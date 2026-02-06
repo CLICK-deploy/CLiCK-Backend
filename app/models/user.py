@@ -14,6 +14,7 @@ class User(Base):
     __tablename__ = "users"
 
     user_id = Column(Integer, primary_key=True, autoincrement=True)
+    # 고민해보기: device_uuid를 사용해 고생한만큼 효용이 나올까?(일단 2명은 있으면 좋겠다고 함)
     device_uuid = Column(String(36), unique=True)
     nickname = Column(String(20), nullable=True, unique=True)
     password = Column(String(50), nullable=True)

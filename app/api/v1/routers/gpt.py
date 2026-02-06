@@ -1,3 +1,5 @@
+# TODO: device_uuid 기반 유저 관리 수정할 것, max_tokens&temperature 조정할 것
+
 import json
 from typing import List
 from sqlalchemy.sql import desc

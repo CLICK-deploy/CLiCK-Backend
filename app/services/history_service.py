@@ -26,7 +26,7 @@ def create_history(in_, role:MessageRole, db:Session):
             user_id=user.user_id,
             room_id=in_.room_id,
             role=MessageRole.AI,
-            topic=in_.input_prompt)
+            topic=in_.input_prompt) # input_prompt 좀 가공하기(핵심만 뽑는다든가)
         db.add(new_history)
         db.commit()
         db.refresh(new_history)

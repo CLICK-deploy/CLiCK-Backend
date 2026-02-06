@@ -13,6 +13,7 @@ class History(Base):
     user_id = Column(Integer, ForeignKey("users.user_id"), nullable=False)
     room_id = Column(String(200), nullable=False)
     role = Column(SAEnum(MessageRole, name='message_role'), nullable=False, server_default='user')
+    # 일단 나중에 생각해봐요: topic 분리 방식
     topic = Column(String(255), nullable=False)
     created_at = Column(DateTime, server_default=func.now())
 
