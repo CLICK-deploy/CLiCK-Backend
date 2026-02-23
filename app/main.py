@@ -7,7 +7,7 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# CORS 설정 추가#
+# CORS 설정 추가 #
 app.add_middleware(
     CORSMiddleware,
     allow_origins=['*'],

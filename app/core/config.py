@@ -7,7 +7,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env")
 
     # .env에서 읽힐 실제 필드들
-    OPENAI_API_KEY: str
+    GEMMA_API_KEY: str
     DATABASE_URL: str
     # SECRET_KEY: str
     # REFRESH_SECRET_KEY: str

@@ -1,33 +1,28 @@
-import re
-from pydantic import model_validator, BaseModel, constr, Field, ConfigDict, ValidationInfo
-from pydantic.types import conlist, UUID
-from typing import Optional
+from pydantic import model_validator, BaseModel, Field, ConfigDict, ValidationInfo
+from pydantic.types import StringConstraints, UUID
+from typing import Optional, Annotated
 
 class RoomTrace(BaseModel):
-    device_uuid: str
+    user_id: str
     room_id: str
     input_prompt: str
 
 class RecommendInput(BaseModel):
-    device_uuid: str
+    user_id: str
     room_id: Optional[str]
 
-class inputPrompt(BaseModel):
-    device_uuid: str
-    input_prompt: str
-
 class Patch(BaseModel):
-    tag: constr(strip_whitespace=True, min_length=1)
+    tag: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
     # "from"는 파이썬 예약어 충돌을 피하려고 from_로 받고 alias를 "from"으로 둡니다.
-    from_: constr(strip_whitespace=True, min_length=1) = Field(alias="from")
-    to:    constr(strip_whitespace=True, min_length=1)
+    from_: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)] = Field(alias="from")
+    to:    Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 
     model_config = ConfigDict(populate_by_name=True)
 
 class outputPrompt(BaseModel):
-    topic: constr(strip_whitespace=True, min_length=1, max_length=30)
-    patches: conlist(Patch, min_length=1, max_length=30)
-    full_suggestion: constr(strip_whitespace=True, min_length=1)
+    topic: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=30)]
+    patches: Annotated[list[Patch], Field(min_length=1, max_length=30)] # list[Patch] = Field(min_length=1, max_length=30)
+    full_suggestion: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1),]
 
     @model_validator(mode="after")
     def corss_checks(self, info: ValidationInfo):
@@ -62,4 +57,4 @@ class RecommendedPrompt(BaseModel):
     title: str
     content: str
 
-RecommendedPromptList = conlist(RecommendedPrompt, min_length=1, max_length=3)
+RecommendedPromptList = Annotated[list[RecommendedPrompt], Field(min_length=1, max_length=3)] # list[RecommendedPrompt] = Field(min_length=1, max_length=3)

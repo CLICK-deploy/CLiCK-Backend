@@ -1,224 +1,110 @@
-# TODO: device_uuid 기반 유저 관리 수정할 것, max_tokens&temperature 조정할 것
+# TODO: max_tokens&temperature 조정할 것
 
 import json
-from typing import List
-from sqlalchemy.sql import desc
 from app.core.config import settings
 from app.core.prompts.prompt_loader import IMPROVE_SYS_PROMPT, REC_SYS_PROMPT1, REC_SYS_PROMPT2
-from app.models.history import History
-from app.schemas.gpt import inputPrompt, RecommendedPrompt, RecommendedPromptList, outputPrompt, RoomTrace, \
-    RecommendInput
+from app.schemas.gpt import RoomTrace, RecommendInput
 from sqlalchemy.orm import Session
 from fastapi import APIRouter, HTTPException, Depends
-from openai import OpenAI
-from pydantic import ValidationError
-from app.services import user_service, event_service
+from huggingface_hub import InferenceClient
+from app.services import user_service, event_service, history_service
+from app.schemas.gpt import RecommendedPromptList
 from app.db.session import get_db
 from app.services.history_service import create_history, get_histories, get_histories_new
 
 router = APIRouter(prefix="")
 
-client = OpenAI(api_key=settings.OPENAI_API_KEY)
-
-@router.post(path="/analyze-prompt2", summary="사용자가 입력한 프롬프트를 분석하여 개선안을 제안")
-async def analyze_prompt(in_: inputPrompt, db:Session = Depends(get_db)):
-    if not user_service.is_exist_user(in_.device_uuid, db):
-        user_service.create_user(in_.device_uuid, db)
-
-    try:
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {
-                    "role": "system",
-                    "content": IMPROVE_SYS_PROMPT
-                },
-                {"role": "user", "content": in_.input_prompt}
-            ],
-            max_tokens=800,
-            # 필요 시 파라미터: temperature=0.3, max_tokens=800 등
-        )
-
-        raw = response.choices[0].message.content
-        print(raw)
-        # 1) GPT 응답 파싱
-        try:
-            parsed = json.loads(raw)
-        except json.JSONDecodeError:
-            raise HTTPException(status_code=502, detail="GPT 응답 JSON 파싱 실패")
-
-        try:
-            validated = outputPrompt.model_validate(parsed, context={"original": in_.input_prompt})
-        except ValidationError as e:
-            raise HTTPException(status_code=400, detail=f"스키마/규칙 위반: {e.errors()}")
-
-        # 2) DB 저장 (event)
-        event_service.create_event(in_.device_uuid, in_.input_prompt, validated, db)
-
-        # 3) 그대로 클라이언트에 반환(topic/patches/full_suggestion 사용)
-        return validated.model_dump(by_alias=True)
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+client = InferenceClient(api_key=settings.GEMMA_API_KEY)
 
 
 @router.post(path="/trace_input", summary="유저 질문 수집 -> 유저의 관심사 파악")
 def trace_input_prompt(in_: RoomTrace, db:Session = Depends(get_db)):
-    if not user_service.is_exist_user(in_.device_uuid, db):
-        user_service.create_user(in_.device_uuid, db)
+    if not user_service.is_exist_user(in_.user_id, db):
+        user_service.create_user(in_.user_id, db)
 
-    new_history = create_history(in_, 'user',db)
+    new_history = history_service.create_history(in_, 'user',db)
 
     return {"status": "success"}
 
 @router.post(path="/trace_output_prompt", summary="ai 답변 수집 -> 유저의 관심사 파악")
 def trace_output_prompt(in_: RoomTrace, db:Session = Depends(get_db)):
-    if not user_service.is_exist_user(in_.device_uuid, db):
-        user_service.create_user(in_.device_uuid, db)
+    if not user_service.is_exist_user(in_.user_id, db):
+        user_service.create_user(in_.user_id, db)
 
-    new_history = create_history(in_,'ai',db)
+    new_history = history_service.create_history(in_,'ai',db)
 
     return {"status": "success"}
 
 @router.post(
     "/recommended-prompts",
-    summary="유저별 관심사 기반 추천 프롬프트 3개 생성"
+    summary="유저별 관심사 기반 추천 프롬프트 2개 생성"
 )
 async def get_recommend_prompts(
     in_: RecommendInput,
     db: Session = Depends(get_db),
 ):
-    if in_.room_id is None: # 새 채팅방
-        # 1) 최근 3개 room 주제
-        histories = get_histories_new(in_.device_uuid, db)
-        topics = [h.topic for h in histories]
+    # 1) 조건에 따른 히스토리 조회 및 시스템 프롬프트 할당
+    if in_.room_id is None:
+        # 새 채팅방
+        histories = get_histories_new(in_.user_id, db)
+        sys_prompt = REC_SYS_PROMPT2
+    else:
+        # 기존 채팅방
+        histories = get_histories(in_.user_id, in_.room_id, db)
+        sys_prompt = REC_SYS_PROMPT1
 
-        # 히스토리가 전혀 없으면 빈 배열 반환(또는 204/404 중 정책 선택)
-        if not topics:
-            return []
+    topics = [h.topic for h in histories]
 
-        # 2) GPT 호출
-        user_payload = {
-            "topics": topics
-        }
+    # 히스토리가 전혀 없으면 빈 배열 반환
+    if not topics:
+        return []
 
-        resp = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": REC_SYS_PROMPT2},
-                {"role": "user", "content": json.dumps(user_payload, ensure_ascii=False)},
-            ],
-            temperature=0.4,
-            max_tokens=400,
-        )
-
-        raw = resp.choices[0].message.content
-        parsed = json.loads(raw)
-        return parsed
-    else: # 기존 채팅방
-
-        # 1) 히스토리 토픽 조회
-        histories = get_histories(in_.device_uuid, in_.room_id, db)
-        topics = [h.topic for h in histories]
-
-        # 히스토리가 전혀 없으면 빈 배열 반환(또는 204/404 중 정책 선택)
-        if not topics:
-            return []
-
-        # 2) GPT 호출
-        user_payload = {
-            "topics": topics
-        }
-
-        resp = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": REC_SYS_PROMPT1},
-                {"role": "user", "content": json.dumps(user_payload, ensure_ascii=False)},
-            ],
-            temperature=0.4,
-            max_tokens=400,
-        )
-
-        raw = resp.choices[0].message.content
-        parsed = json.loads(raw)  # ✅ 파싱해서 dict/list로 변환
-        return parsed
-    # # 3) JSON 파싱 & 유효성 검사
-    # try:
-    #     data = json.loads(raw)
-    #     # title 30자 규칙을 추가로 보수적으로 보정(너무 길게 오면 자르기)
-    #     for item in data:
-    #         if "title" in item and isinstance(item["title"], str) and len(item["title"]) > 30:
-    #             item["title"] = item["title"][:30]
-    # except Exception:
-    #     raise HTTPException(status_code=502, detail="추천 프롬프트 응답(JSON) 파싱 실패")
-    #
-    # try:
-    #     validated = RecommendedPromptList.validate(data)
-    # except Exception as e:
-    #     raise HTTPException(status_code=502, detail=f"추천 프롬프트 응답 스키마 불일치: {e}")
-    #
-    # return validated
-
-# @router.get(
-#     "/recommended-new-prompts/{device_uuid}",
-#     summary="새 채팅에서 유저별 관심사 기반 추천 프롬프트 3개 생성"
-# )
-# async def get_recommended_prompts_new(
-#     device_uuid: str,
-#     db: Session = Depends(get_db),
-# ):
-#     # 1) 최근 3개 room 주제
-#     histories = get_histories_new(device_uuid, db)
-#     topics = [h.topic for h in histories]
-#
-#     # 히스토리가 전혀 없으면 빈 배열 반환(또는 204/404 중 정책 선택)
-#     if not topics:
-#         return []
-#
-#     # 2) GPT 호출
-#     user_payload = {
-#         "topics": topics
-#     }
-#
-#     resp = client.chat.completions.create(
-#         model="gpt-4o-mini",
-#         messages=[
-#             {"role": "system", "content": REC_SYS_PROMPT2},
-#             {"role": "user", "content": json.dumps(user_payload, ensure_ascii=False)},
-#         ],
-#         temperature=0.4,
-#         max_tokens=400,
-#     )
-#
-#     raw = resp.choices[0].message.content
-#     parsed = json.loads(raw)
-#     return parsed
-#     # # 3) JSON 파싱 & 유효성 검사
-#     # try:
-#     #     data = json.loads(raw)
-#     #     # title 30자 규칙을 추가로 보수적으로 보정(너무 길게 오면 자르기)
-#     #     for item in data:
-#     #         if "title" in item and isinstance(item["title"], str) and len(item["title"]) > 30:
-#     #             item["title"] = item["title"][:30]
-#     # except Exception:
-#     #     raise HTTPException(status_code=502, detail="추천 프롬프트 응답(JSON) 파싱 실패")
-#     #
-#     # try:
-#     #     validated = RecommendedPromptList.validate(data)
-#     # except Exception as e:
-#     #     raise HTTPException(status_code=502, detail=f"추천 프롬프트 응답 스키마 불일치: {e}")
-#     #
-#     # return validated
-
-@router.post(path="/analyze-prompt1", summary="사용자가 입력한 프롬프트를 분석하여 개선안을 제안")
-async def analyze_prompt(in_: inputPrompt, db:Session = Depends(get_db)):
-    if not user_service.is_exist_user(in_.device_uuid, db):
-        user_service.create_user(in_.device_uuid, db)
+    # 2) 모델 호출
+    user_payload = {
+        "topics": topics
+    }
 
     try:
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
+        resp = client.chat_completion(
+            model="gemma-3-1b-it",
+            messages=[
+                {"role": "system", "content": sys_prompt},
+                {"role": "user", "content": json.dumps(user_payload, ensure_ascii=False)},
+            ],
+            temperature=0.4,
+            max_tokens=400,
+        )
+        raw = resp.choices[0].message.content
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"LLM 모델 호출 실패: {e}")
+
+    # 3) JSON 파싱 & 타이틀 길이 보정
+    try:
+        data = json.loads(raw)
+        # title 30자 규칙 보정 (너무 길게 오면 자르기)
+        for item in data:
+            if "title" in item and isinstance(item["title"], str) and len(item["title"]) > 30:
+                item["title"] = item["title"][:30]
+    except Exception:
+        raise HTTPException(status_code=502, detail="추천 프롬프트 응답(JSON) 파싱 실패")
+
+    # 4) Pydantic 유효성 검사
+    try:
+        validated = RecommendedPromptList.validate(data)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"추천 프롬프트 응답 스키마 불일치: {e}")
+
+    return validated
+
+"""
+@router.post(path="/analyze-prompt1", summary="사용자가 입력한 프롬프트를 분석하여 개선안을 제안")
+async def analyze_prompt(in_: InputPrompt, db:Session = Depends(get_db)):
+    if not user_service.is_exist_user(in_.user_id, db):
+        user_service.create_user(in_.user_id, db)
+
+    try:
+        response = client.chat_completion(
+            model="gemma-3-1b-it",
             messages=[
                 {
                     "role": "system",
@@ -289,10 +175,11 @@ async def analyze_prompt(in_: inputPrompt, db:Session = Depends(get_db)):
         res = json.loads(raw)
         print(raw)
         # 2) DB 저장 (event)
-        event_service.create_event(in_.device_uuid, in_.input_prompt, res, db)
+        event_service.create_event(in_.user_id, in_.input_prompt, res, db)
 
         # 3) 그대로 클라이언트에 반환(topic/patches/full_suggestion 사용)
         return res
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+"""

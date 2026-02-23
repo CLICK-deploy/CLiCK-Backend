@@ -1,19 +1,20 @@
-
-
 from __future__ import annotations
 
 import json
 import re
 from typing import List, Optional, Literal, Dict, Any
 from app.core.config import settings
-from fastapi import FastAPI, APIRouter, HTTPException
-from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field, ValidationError
-from openai import OpenAI
+from app.core.prompts.prompt_loader import IMPROVE_SYS_PROMPT
+from app.services import user_service, event_service
+from app.db.session import get_db
+from sqlalchemy.orm import Session
+from fastapi import APIRouter, HTTPException, Depends
+from pydantic import BaseModel, Field
+from huggingface_hub import InferenceClient
 
 router = APIRouter(prefix="")
 
-client = OpenAI(api_key=settings.OPENAI_API_KEY)
+client = InferenceClient(api_key=settings.GEMMA_API_KEY)
 
 TaskType = Literal[
     "qa_fact",
@@ -29,6 +30,8 @@ TaskType = Literal[
 ]
 
 class InputPrompt(BaseModel):
+    user_id: str
+    input_prompt: str
     prompt: str = Field(..., description="사용자가 LLM에 보낼 원본 질문/요청")
     language: Literal["ko", "en"] = Field("ko", description="개선 프롬프트와 보조출력을 생성할 언어")
     domain: Optional[str] = Field(None, description="도메인(예: ecommerce, fintech, education 등)")
@@ -195,20 +198,19 @@ Language: Mirror the user's requested language (ko/en). If not specified, use ko
 # Endpoint
 # -----------------------------
 @router.post(
-    path="/analyze-prompt22",
+    path="/analyze-prompt",
     summary="사용자가 입력한 프롬프트를 분석하여 개선안을 제안",
     response_model=AnalyzePromptResponse,
 )
-async def analyze_prompt(in_: InputPrompt):
-    # 1) Prepare user content (context bundle)
-    user_prompt_text = in_.prompt.strip()
-    if not user_prompt_text:
-        raise HTTPException(status_code=400, detail="prompt가 비어 있습니다.")
+async def analyze_prompt(in_: InputPrompt, db: Session = Depends(get_db)):
+    # 1) 유저 존재 여부 확인 및 생성
+    if not user_service.is_exist_user(in_.user_id, db):
+        user_service.create_user(in_.user_id, db)
 
-    # Optional simple PII masking for transport (you can disable via in_.mask_pii=False)
-    transport_text = mask_pii_text(user_prompt_text) if in_.mask_pii else user_prompt_text
+    # 2) PII 마스킹 및 컨텍스트 조립
+    transport_text = mask_pii_text(in_.prompt) if in_.mask_pii else in_.prompt
 
-    # Build a compact "context card" for the model (kept short to save tokens)
+    # 3) 모델에 전달할 Context 블록 조립
     context_items = []
     if in_.domain:
         context_items.append(f"domain: {in_.domain}")
@@ -225,76 +227,281 @@ async def analyze_prompt(in_: InputPrompt):
     if in_.enable_web:
         context_items.append("web_search: true (if recency/ambiguity)")
     if in_.examples:
-        # Keep examples short to avoid exceeding token limits
+        # 토큰 한도 초과를 피하기 위해 예시를 짧게 유지
         context_items.append(f"examples: {in_.examples[:1200]}")
 
     if in_.knowledge_snippets:
-        # include only first few snippets to keep brief
+        # 간략히 유지하기 위해 첫 번째부터 약간의 스니펫들만 포함
         limited_snips = in_.knowledge_snippets[:3]
         snip_join = "\n---\n".join(s[:1200] for s in limited_snips)
         context_items.append(f"knowledge_snippets:\n{snip_join}")
 
     context_block = "\n".join(context_items) if context_items else "none"
 
-    # 2) Compose messages for Chat Completions (JSON mode)
+    # 3) Few-shot이 포함된 메시지 구성
     messages = [
-        {"role": "system", "content": _SYS_PROMPT},
+        {"role": "system", "content": IMPROVE_SYS_PROMPT},
+        {"role": "user", "content": "도커에 대해 설명해줘"},
+        {"role": "assistant", "content": '{"patches": [{"tag": "문체/스타일 개선", "from": "도커", "to": "Docker", "occurrence": 1}, {"tag": "모호/지시 불명확", "from": "설명해줘", "to": "컨테이너 개념과 이미지/레지스트리 중심으로 설명해줘", "occurrence": 1}], "full_suggestion": "Docker에 대해 컨테이너 개념과 이미지/레지스트리 중심으로 설명해줘."}'},
+        # 실제 사용자 요청
+        {"role": "user", "content": f"[language]: {in_.language}\n[context]:\n{context_block}\n[original_prompt]:\n{transport_text}"}
+    ]
+
+    # 4) LLM 호출 (json_schema를 사용하여 구조 강제 - 파싱 에러 원천 차단)
+    try:
+        response = client.chat_completion(
+            model="gemma-3-1b-it",
+            messages=messages,
+            temperature=in_.temperature,
+            max_tokens=in_.max_tokens,
+            response_format={
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "PromptEdit",
+                    "strict": True,
+                    "schema": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": {
+                            "patches": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "additionalProperties": False,
+                                    "properties": {
+                                        "tag": {"type": "string", "minLength": 1},
+                                        "from": {"type": "string", "minLength": 1},
+                                        "to": {"type": "string", "minLength": 1}
+                                    },
+                                    "required": ["tag", "from", "to"]
+                                }
+                            },
+                            "full_suggestion": {"type": "string", "minLength": 1}
+                        },
+                        "required": ["patches", "full_suggestion"]
+                    }
+                }
+            }
+        )
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"LLM API 연동 에러: {e}")
+
+    # 5) 응답 추출 및 JSON 파싱
+    raw_text = response.choices[0].message.content
+    try:
+        parsed_data = json.loads(raw_text)
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=502, detail="GPT 응답 JSON 파싱 실패")
+
+    # 6) DB 저장 
+    try:
+        event_service.create_event(in_.user_id, in_.prompt, parsed_data, db)
+    except Exception as e:
+        print(f"DB Event Log Error: {e}") # 메인 로직을 방해하지 않게 로깅만 수행
+
+    # 7) 클라이언트 반환
+    usage = getattr(response, "usage", None)
+    return {
+        "result": parsed_data,
+        "model": "gemma-3-1b-it",
+        "usage": {
+            "prompt_tokens": getattr(usage, "prompt_tokens", None),
+            "completion_tokens": getattr(usage, "completion_tokens", None),
+            "total_tokens": getattr(usage, "total_tokens", None),
+        } if usage else None
+    }
+
+"""
+# -----------------------------
+# Endpoint
+# -----------------------------
+@router.post(
+    path="/analyze-prompt",
+    summary="사용자가 입력한 프롬프트를 분석하여 개선안을 제안 (전체 로직 통합)",
+    response_model=AnalyzePromptResponse,
+)
+async def analyze_prompt(in_: InputPrompt, db: Session = Depends(get_db)):
+    # 유저 DB 검증 및 생성
+    if not user_service.is_exist_user(in_.user_id, db):
+        user_service.create_user(in_.user_id, db)
+
+    # 1) Prepare user content (context bundle)
+    # in_.input_prompt과 in_.prompt를 모두 지원하도록 유연하게 추출
+    user_prompt_text = getattr(in_, "input_prompt", getattr(in_, "prompt", "")).strip()
+    if not user_prompt_text:
+        raise HTTPException(status_code=400, detail="prompt가 비어 있습니다.")
+
+    # Optional simple PII masking for transport
+    transport_text = mask_pii_text(user_prompt_text) if getattr(in_, "mask_pii", False) else user_prompt_text
+
+    # Build a compact "context card" for the model
+    context_items = []
+    if getattr(in_, "domain", None):
+        context_items.append(f"domain: {in_.domain}")
+    if getattr(in_, "desired_output_format", None):
+        context_items.append(f"desired_output_format: {in_.desired_output_format}")
+    if getattr(in_, "style_guide", None):
+        context_items.append(f"style_guide: {in_.style_guide}")
+    if getattr(in_, "additional_constraints", None):
+        context_items.append(f"additional_constraints: {in_.additional_constraints}")
+    if getattr(in_, "user_context", None):
+        context_items.append(f"user_context: {in_.user_context}")
+    if getattr(in_, "enable_rag", False):
+        context_items.append("rag: true (if beneficial)")
+    if getattr(in_, "enable_web", False):
+        context_items.append("web_search: true (if recency/ambiguity)")
+    if getattr(in_, "examples", None):
+        context_items.append(f"examples: {in_.examples[:1200]}")
+
+    if getattr(in_, "knowledge_snippets", None):
+        limited_snips = in_.knowledge_snippets[:3]
+        snip_join = "\n---\n".join(s[:1200] for s in limited_snips)
+        context_items.append(f"knowledge_snippets:\n{snip_join}")
+
+    context_block = "\n".join(context_items) if context_items else "none"
+
+    # 2) Compose messages (Few-shot + Context)
+    messages = [
+        {
+            "role": "system",
+            "content": IMPROVE_SYS_PROMPT  # 또는 22번의 _SYS_PROMPT
+        },
+        # Endpoint 1의 Few-Shot 예시 그대로 유지
+        {"role": "user", "content": "도커에 대해 설명해줘"},
+        {"role": "assistant", "content": '''
+            {
+  "patches": [
+    { "tag": "문체/스타일 개선", "from": "도커", "to": "Docker", "occurrence": 1 },
+    { "tag": "모호/지시 불명확", "from": "설명해줘", "to": "컨테이너 개념과 이미지/레지스트리 중심으로 설명해줘", "occurrence": 1 }
+  ],
+  "full_suggestion": "Docker에 대해 컨테이너 개념과 이미지/레지스트리 중심으로 설명해줘."
+}
+        '''},
+        {"role": "user", "content": "인공지능에 대해 자세하고 상세하게 설명 해줬스면 좋겠어."},
+        {"role": "assistant", "content": '''{
+            patches: [
+                {“tag”:“모호/지시 불명확”.
+                        “from”: "설명",
+                        “to”: "기본 개념을 3가지 핵심 포인트로 설명"
+                    }
+                ,
+                {“tag”:구조/길이 중복”,
+                        “from”: "자세하고 상세하게",
+                        “to”: "자세하게"
+                    },
+               {“tag”: "오타/맞춤법”:,
+                        “from”: "해줬스면",
+                        “to”: "해주었으면”}
+            ],
+  "full_suggestion": "FastAPI 파일 업로드 단계별 코드 예시와 보안 고려사항을 포함해 알려줘"
+}'''
+        },
+        # 복합 User Prompt 적용
         {
             "role": "user",
             "content": (
-                f"[language]: {in_.language}\n"
+                f"[language]: {getattr(in_, 'language', 'ko')}\n"
                 f"[context]:\n{context_block}\n"
                 f"[original_prompt]:\n{transport_text}"
             ),
-        },
+        }
     ]
 
-    # 3) Call OpenAI (force JSON object output)
+    # 3) Call OpenAI (JSON Schema 강제 + 파라미터 적용)
     try:
-        completion = client.chat.completions.create(
-            model="gpt-4o-mini",
+        completion = client.chat_completion(
+            model="gemma-3-1b-it",
             messages=messages,
-            temperature=in_.temperature or 0.3,
-            max_tokens=in_.max_tokens or 900,
-            response_format={"type": "json_object"},
+            temperature=getattr(in_, "temperature", 0.3),
+            max_tokens=getattr(in_, "max_tokens", 900) or 800,
+            # Endpoint 1의 엄격한 json_schema 강제 구조 그대로 유지
+            response_format={
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "PromptEdit",
+                    "strict": True,
+                    "schema": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": {
+                            "patches": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "additionalProperties": False,
+                                    "properties": {
+                                        "tag": { "type": "string", "minLength": 1 },
+                                        "from": { "type": "string", "minLength": 1 },
+                                        "to":   { "type": "string", "minLength": 1 }
+                                    },
+                                    "required": ["tag", "from", "to"]
+                                }
+                            },
+                            "full_suggestion": { "type": "string", "minLength": 1 }
+                        },
+                        "required": ["patches", "full_suggestion"]
+                    }
+                }
+            }
         )
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"OpenAI API error: {e}")
 
     # 4) Parse response to JSON + validate
     raw_text = completion.choices[0].message.content if completion.choices else ""
+    print(raw_text) # Endpoint 2의 출력 유지
+
     if not raw_text:
         raise HTTPException(status_code=502, detail="모델 응답이 비어 있습니다.")
 
+    # Fallback(재시도) 로직 및 JSONDecodeError 처리 병합
     try:
-        parsed = coerce_json_from_text(raw_text)
+        try:
+            parsed = coerce_json_from_text(raw_text)
+        except NameError:
+            # coerce_json_from_text가 없을 경우 json.loads로 대체 (호환성 유지)
+            parsed = json.loads(raw_text)
     except Exception:
         # Retry once without response_format (fallback) to repair JSON
         try:
-            repair_try = client.chat.completions.create(
-                model="gpt-4o-mini",
+            repair_try = client.chat_completion(
+                model="gemma-3-1b-it",
                 messages=messages + [
                     {
                         "role": "system",
                         "content": "The previous output was not valid JSON. Return ONLY a valid JSON object per the schema.",
                     }
                 ],
-                temperature=in_.temperature or 0.2,
-                max_tokens=in_.max_tokens or 900,
+                temperature=getattr(in_, "temperature", 0.2),
+                max_tokens=getattr(in_, "max_tokens", 900) or 800,
             )
             raw_text = repair_try.choices[0].message.content if repair_try.choices else ""
-            parsed = coerce_json_from_text(raw_text)
+            try:
+                parsed = coerce_json_from_text(raw_text)
+            except NameError:
+                parsed = json.loads(raw_text)
         except Exception as e:
-            raise HTTPException(status_code=502, detail=f"모델 JSON 파싱 실패: {e}")
+            raise HTTPException(status_code=502, detail=f"모델 JSON 파싱 실패 및 GPT 응답 파싱 실패: {e}")
 
-    # Validate with Pydantic
+    # Validate with Pydantic (Endpoint 2의 OutputPrompt 모델링 + Endpoint 22의 ValidationError 처리 병합)
     try:
-        payload = ImprovedPromptPayload(**parsed)
-    except ValidationError as ve:
-        # Attach partial raw for debugging
-        raise HTTPException(status_code=422, detail=f"스키마 검증 실패: {ve}")
+        # 실제 환경에서 쓰시는 모델(outputPrompt 또는 ImprovedPromptPayload)을 사용하시면 됩니다.
+        # 여기서는 두 코드의 검증 방식을 모두 지원하도록 예외 처리와 context를 살려두었습니다.
+        try:
+            payload = outputPrompt.model_validate(parsed, context={"original": user_prompt_text})
+        except NameError:
+            payload = ImprovedPromptPayload(**parsed)
+    except ValidationError as e:
+        raise HTTPException(status_code=422, detail=f"스키마/규칙 위반 및 검증 실패: {e.errors()}")
 
-    # 5) Build response
+    # 5) DB 저장 (event)
+    try:
+        # Pydantic 객체를 dict로 변환하여 저장
+        event_service.create_event(in_.user_id, user_prompt_text, payload.model_dump(by_alias=True), db)
+    except Exception as e:
+        print(f"DB Log Error: {e}")
+
+    # 6) Build response Usage & JSONResponse 반환
     usage = getattr(completion, "usage", None)
     usage_dict = None
     if usage is not None:
@@ -307,15 +514,14 @@ async def analyze_prompt(in_: InputPrompt):
         except Exception:
             usage_dict = None
 
+    # 최종 클라이언트에 반환 (그대로 반환하는 목적을 풍부한 메타데이터 포맷으로 감싸서 리턴)
     return JSONResponse(
         status_code=200,
         content=AnalyzePromptResponse(
             result=payload,
-            model=getattr(completion, "model", "gpt-4o-mini"),
+            model=getattr(completion, "model", "gemma-3-1b-it"),
             usage=usage_dict,
             raw_text=raw_text,
-        ).model_dump()
+        ).model_dump(by_alias=True)
     )
-
-
-
+"""
