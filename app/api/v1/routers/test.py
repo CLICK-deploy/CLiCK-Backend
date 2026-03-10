@@ -10,11 +10,11 @@ from app.db.session import get_db
 from sqlalchemy.orm import Session
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, Field
-from huggingface_hub import InferenceClient
+import google.generativeai as genai
 
 router = APIRouter(prefix="")
 
-client = InferenceClient(api_key=settings.GEMMA_API_KEY)
+genai.configure(api_key=settings.GEMMA_API_KEY)
 
 TaskType = Literal[
     "qa_fact",
@@ -238,76 +238,48 @@ async def analyze_prompt(in_: InputPrompt, db: Session = Depends(get_db)):
 
     context_block = "\n".join(context_items) if context_items else "none"
 
-    # 3) Few-shot이 포함된 메시지 구성
-    messages = [
-        {"role": "system", "content": IMPROVE_SYS_PROMPT},
-        {"role": "user", "content": "도커에 대해 설명해줘"},
-        {"role": "assistant", "content": '{"patches": [{"tag": "문체/스타일 개선", "from": "도커", "to": "Docker", "occurrence": 1}, {"tag": "모호/지시 불명확", "from": "설명해줘", "to": "컨테이너 개념과 이미지/레지스트리 중심으로 설명해줘", "occurrence": 1}], "full_suggestion": "Docker에 대해 컨테이너 개념과 이미지/레지스트리 중심으로 설명해줘."}'},
-        # 실제 사용자 요청
-        {"role": "user", "content": f"[language]: {in_.language}\n[context]:\n{context_block}\n[original_prompt]:\n{transport_text}"}
-    ]
-
-    # 4) LLM 호출 (json_schema를 사용하여 구조 강제 - 파싱 에러 원천 차단)
+    # 3) LLM 호출
     try:
-        response = client.chat_completion(
-            model="gemma-3-1b-it",
-            messages=messages,
-            temperature=in_.temperature,
-            max_tokens=in_.max_tokens,
-            response_format={
-                "type": "json_schema",
-                "json_schema": {
-                    "name": "PromptEdit",
-                    "strict": True,
-                    "schema": {
-                        "type": "object",
-                        "additionalProperties": False,
-                        "properties": {
-                            "patches": {
-                                "type": "array",
-                                "items": {
-                                    "type": "object",
-                                    "additionalProperties": False,
-                                    "properties": {
-                                        "tag": {"type": "string", "minLength": 1},
-                                        "from": {"type": "string", "minLength": 1},
-                                        "to": {"type": "string", "minLength": 1}
-                                    },
-                                    "required": ["tag", "from", "to"]
-                                }
-                            },
-                            "full_suggestion": {"type": "string", "minLength": 1}
-                        },
-                        "required": ["patches", "full_suggestion"]
-                    }
-                }
-            }
+        gemini_model = genai.GenerativeModel(
+            model_name="gemma-3-1b-it",
+            system_instruction=IMPROVE_SYS_PROMPT,
+            generation_config=genai.GenerationConfig(
+                temperature=in_.temperature,
+                max_output_tokens=in_.max_tokens,
+                response_mime_type="application/json",
+            ),
         )
+        user_content = f"[language]: {in_.language}\n[context]:\n{context_block}\n[original_prompt]:\n{transport_text}"
+        response = gemini_model.generate_content([
+            {"role": "user", "parts": ["도커에 대해 설명해줘"]},
+            {"role": "model", "parts": ['{"patches": [{"tag": "문체/스타일 개선", "from": "도커", "to": "Docker"}, {"tag": "모호/지시 불명확", "from": "설명해줘", "to": "컨테이너 개념과 이미지/레지스트리 중심으로 설명해줘"}], "full_suggestion": "Docker에 대해 컨테이너 개념과 이미지/레지스트리 중심으로 설명해줘."}']},
+            {"role": "user", "parts": [user_content]},
+        ])
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"LLM API 연동 에러: {e}")
 
     # 5) 응답 추출 및 JSON 파싱
-    raw_text = response.choices[0].message.content
+    raw_text = response.text
     try:
         parsed_data = json.loads(raw_text)
     except json.JSONDecodeError:
         raise HTTPException(status_code=502, detail="GPT 응답 JSON 파싱 실패")
 
-    # 6) DB 저장 
+    # 6) DB 저장
     try:
         event_service.create_event(in_.user_id, in_.prompt, parsed_data, db)
     except Exception as e:
-        print(f"DB Event Log Error: {e}") # 메인 로직을 방해하지 않게 로깅만 수행
+        print(f"DB Event Log Error: {e}")
 
     # 7) 클라이언트 반환
-    usage = getattr(response, "usage", None)
+    usage = getattr(response, "usage_metadata", None)
     return {
         "result": parsed_data,
         "model": "gemma-3-1b-it",
         "usage": {
-            "prompt_tokens": getattr(usage, "prompt_tokens", None),
-            "completion_tokens": getattr(usage, "completion_tokens", None),
-            "total_tokens": getattr(usage, "total_tokens", None),
+            "prompt_tokens": getattr(usage, "prompt_token_count", None),
+            "completion_tokens": getattr(usage, "candidates_token_count", None),
+            "total_tokens": getattr(usage, "total_token_count", None),
         } if usage else None
     }
 

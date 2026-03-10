@@ -6,7 +6,7 @@ from app.core.prompts.prompt_loader import IMPROVE_SYS_PROMPT, REC_SYS_PROMPT1, 
 from app.schemas.gpt import RoomTrace, RecommendInput
 from sqlalchemy.orm import Session
 from fastapi import APIRouter, HTTPException, Depends
-from huggingface_hub import InferenceClient
+import google.generativeai as genai
 from app.services import user_service, event_service, history_service
 from app.schemas.gpt import RecommendedPromptList
 from app.db.session import get_db
@@ -14,7 +14,7 @@ from app.services.history_service import create_history, get_histories, get_hist
 
 router = APIRouter(prefix="")
 
-client = InferenceClient(api_key=settings.GEMMA_API_KEY)
+genai.configure(api_key=settings.GEMMA_API_KEY)
 
 
 @router.post(path="/trace_input", summary="유저 질문 수집 -> 유저의 관심사 파악")
@@ -65,16 +65,13 @@ async def get_recommend_prompts(
     }
 
     try:
-        resp = client.chat_completion(
-            model="gemma-3-1b-it",
-            messages=[
-                {"role": "system", "content": sys_prompt},
-                {"role": "user", "content": json.dumps(user_payload, ensure_ascii=False)},
-            ],
-            temperature=0.4,
-            max_tokens=400,
+        model = genai.GenerativeModel(
+            model_name="gemma-3-1b-it",
+            system_instruction=sys_prompt,
+            generation_config=genai.GenerationConfig(temperature=0.4, max_output_tokens=400),
         )
-        raw = resp.choices[0].message.content
+        resp = model.generate_content(json.dumps(user_payload, ensure_ascii=False))
+        raw = resp.text
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"LLM 모델 호출 실패: {e}")
 
