@@ -20,22 +20,27 @@ def is_nickname_taken(nickname: str, db: Session) -> bool:
     query = select(User).where(User.nickname == nickname)
     return db.execute(query).scalar() is not None
 
-def register_or_login(nickname: str, password: str, age_group: Optional[str], gender: Optional[str], db: Session) -> Optional[User]:
-    """닉네임이 없으면 회원가입, 있으면 로그인 시도."""
+def signup(nickname: str, password: str, age_group: Optional[str], gender: Optional[str], db: Session) -> Optional[User]:
+    """신규 회원가입. 닉네임 중복이면 None 반환."""
+    if is_nickname_taken(nickname, db):
+        return None
+    new_user = User(
+        nickname=nickname,
+        password=hash_password(password),
+        age=age_group,
+        gender=gender,
+    )
+    db.add(new_user)
+    db.commit()
+    db.refresh(new_user)
+    return new_user
+
+
+def login_user(nickname: str, password: str, db: Session) -> Optional[User]:
+    """로그인. 닉네임 없거나 비밀번호 불일치 시 None 반환."""
     user = db.execute(select(User).where(User.nickname == nickname)).scalar()
     if user is None:
-        # 신규 가입
-        new_user = User(
-            nickname=nickname,
-            password=hash_password(password),
-            age=age_group,
-            gender=gender,
-        )
-        db.add(new_user)
-        db.commit()
-        db.refresh(new_user)
-        return new_user
-    # 기존 유저 — 비밀번호 검증
+        return None
     if user.password and verify_password(password, user.password):
         return user
     return None

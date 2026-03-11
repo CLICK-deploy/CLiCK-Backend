@@ -19,7 +19,7 @@ class User(Base):
     # 고민해보기: device_uuid를 사용해 고생한만큼 효용이 나올까?(일단 2명은 있으면 좋겠다고 함)
     device_uuid = Column(String(36), unique=True)
     nickname = Column(String(20), nullable=True, unique=True)
-    password = Column(String(50), nullable=True)
+    password = Column(String(255), nullable=True)
     gender = Column(String(10), nullable=True)
     age = Column(String(10), nullable=True)
     grade = Column(SQLAlchemyEnum(Grade), nullable=True, default=Grade.GENERAL)

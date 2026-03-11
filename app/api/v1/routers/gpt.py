@@ -2,6 +2,7 @@
 
 import json
 import re
+from typing import Dict, List
 from app.core.config import settings
 from app.core.prompts.prompt_loader import IMPROVE_SYS_PROMPT, REC_SYS_PROMPT1, REC_SYS_PROMPT2
 from app.schemas.gpt import RoomTrace, RecommendInput
@@ -35,7 +36,8 @@ def trace_output_prompt(in_: RoomTrace, db:Session = Depends(get_db)):
 
     return {"status": "success"}
 
-@router.post("/recommended-prompts", summary="유저별 관심사 기반 추천 프롬프트 3개 생성")
+@router.post("/recommended-prompts", summary="유저별 관심사 기반 추천 프롬프트 1개 생성",
+             response_model=Dict[str, dict])
 async def get_recommend_prompts(in_: RecommendInput, db: Session = Depends(get_db)):
     # 1) 조건에 따른 히스토리 조회 및 시스템 프롬프트 할당
     if in_.chatID is None:
@@ -53,7 +55,7 @@ async def get_recommend_prompts(in_: RecommendInput, db: Session = Depends(get_d
 
     # 히스토리가 전혀 없으면 빈 객체 반환
     if not topics:
-        return {response_key: []}
+        return {response_key: {}}
 
     # 2) 모델 호출
     user_payload = {"topics": topics}
@@ -61,7 +63,11 @@ async def get_recommend_prompts(in_: RecommendInput, db: Session = Depends(get_d
     try:
         model = genai.GenerativeModel(
             model_name="gemini-2.5-flash",
-            generation_config=genai.GenerationConfig(temperature=0.4, max_output_tokens=800),
+            generation_config=genai.GenerationConfig(
+                temperature=0.4,
+                max_output_tokens=5000,
+                response_mime_type="application/json",
+            ),
         )
         resp = model.generate_content([
             {"role": "user", "parts": [f"{sys_prompt}\n\n{json.dumps(user_payload, ensure_ascii=False)}"]},
@@ -75,10 +81,8 @@ async def get_recommend_prompts(in_: RecommendInput, db: Session = Depends(get_d
         raw = re.sub(r"^```(?:json)?\s*", "", raw)
         raw = re.sub(r"\s*```$", "", raw).strip()
     try:
-        # LLM이 {"local": [...]} 또는 {"global": [...]} 형태로 반환
         data = json.loads(raw)
     except Exception:
-        # { } 블록 탐색
         try:
             start = raw.find("{")
             end = raw.rfind("}")
@@ -89,17 +93,19 @@ async def get_recommend_prompts(in_: RecommendInput, db: Session = Depends(get_d
         except Exception:
             raise HTTPException(status_code=502, detail=f"추천 프롬프트 응답(JSON) 파싱 실패: {raw[:200]}")
 
-    # LLM이 반환한 키(local/global) 에서 실제 리스트 추출
-    items: list = data.get("local") or data.get("global") or []
+    # LLM이 반환한 키(local/global) 에서 단일 객체 추출
+    item: dict = data.get("local") or data.get("global") or {}
 
-    # 4) id 부여 및 title 30자 보정
-    result_items = []
-    for idx, item in enumerate(items, start=1):
-        title = item.get("title", "")[:30]
-        content = item.get("content", "")
-        result_items.append({"id": idx, "title": title, "content": content})
+    # 배열로 왔을 경우 첫 번째 항목만 사용
+    if isinstance(item, list):
+        item = item[0] if item else {}
 
-    return {response_key: result_items}
+    result = {
+        "title": item.get("title", "")[:30],
+        "content": item.get("content", ""),
+    }
+
+    return {response_key: result}
 
 """
 @router.post(path="/analyze-prompt1", summary="사용자가 입력한 프롬프트를 분석하여 개선안을 제안")
