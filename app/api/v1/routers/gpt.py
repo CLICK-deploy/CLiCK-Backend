@@ -1,6 +1,7 @@
 # TODO: max_tokens&temperature 조정할 것
 
 import json
+import re
 from app.core.config import settings
 from app.core.prompts.prompt_loader import IMPROVE_SYS_PROMPT, REC_SYS_PROMPT1, REC_SYS_PROMPT2
 from app.schemas.gpt import RoomTrace, RecommendInput
@@ -8,7 +9,6 @@ from sqlalchemy.orm import Session
 from fastapi import APIRouter, HTTPException, Depends
 import google.generativeai as genai
 from app.services import user_service, event_service, history_service
-from app.schemas.gpt import RecommendedPromptList
 from app.db.session import get_db
 from app.services.history_service import create_history, get_histories, get_histories_new
 
@@ -19,79 +19,87 @@ genai.configure(api_key=settings.GEMMA_API_KEY)
 
 @router.post(path="/trace_input", summary="유저 질문 수집 -> 유저의 관심사 파악")
 def trace_input_prompt(in_: RoomTrace, db:Session = Depends(get_db)):
-    if not user_service.is_exist_user(in_.user_id, db):
-        user_service.create_user(in_.user_id, db)
+    if not user_service.is_exist_user(in_.userID, db):
+        user_service.create_user(in_.userID, db)
 
-    new_history = history_service.create_history(in_, 'user',db)
+    new_history = history_service.create_history(in_, 'user', db)
 
     return {"status": "success"}
 
 @router.post(path="/trace_output_prompt", summary="ai 답변 수집 -> 유저의 관심사 파악")
 def trace_output_prompt(in_: RoomTrace, db:Session = Depends(get_db)):
-    if not user_service.is_exist_user(in_.user_id, db):
-        user_service.create_user(in_.user_id, db)
+    if not user_service.is_exist_user(in_.userID, db):
+        user_service.create_user(in_.userID, db)
 
-    new_history = history_service.create_history(in_,'ai',db)
+    new_history = history_service.create_history(in_, 'ai', db)
 
     return {"status": "success"}
 
-@router.post(
-    "/recommended-prompts",
-    summary="유저별 관심사 기반 추천 프롬프트 2개 생성"
-)
-async def get_recommend_prompts(
-    in_: RecommendInput,
-    db: Session = Depends(get_db),
-):
+@router.post("/recommended-prompts", summary="유저별 관심사 기반 추천 프롬프트 3개 생성")
+async def get_recommend_prompts(in_: RecommendInput, db: Session = Depends(get_db)):
     # 1) 조건에 따른 히스토리 조회 및 시스템 프롬프트 할당
-    if in_.room_id is None:
-        # 새 채팅방
-        histories = get_histories_new(in_.user_id, db)
+    if in_.chatID is None:
+        # 새 채팅 — 전체 히스토리 기반, global 키 사용
+        histories = get_histories_new(in_.userID, db)
         sys_prompt = REC_SYS_PROMPT2
+        response_key = "global"
     else:
         # 기존 채팅방
-        histories = get_histories(in_.user_id, in_.room_id, db)
+        histories = get_histories(in_.userID, in_.chatID, db)
         sys_prompt = REC_SYS_PROMPT1
+        response_key = in_.chatID
 
     topics = [h.topic for h in histories]
 
-    # 히스토리가 전혀 없으면 빈 배열 반환
+    # 히스토리가 전혀 없으면 빈 객체 반환
     if not topics:
-        return []
+        return {response_key: []}
 
     # 2) 모델 호출
-    user_payload = {
-        "topics": topics
-    }
+    user_payload = {"topics": topics}
 
     try:
         model = genai.GenerativeModel(
-            model_name="gemma-3-1b-it",
-            system_instruction=sys_prompt,
-            generation_config=genai.GenerationConfig(temperature=0.4, max_output_tokens=400),
+            model_name="gemini-2.5-flash",
+            generation_config=genai.GenerationConfig(temperature=0.4, max_output_tokens=800),
         )
-        resp = model.generate_content(json.dumps(user_payload, ensure_ascii=False))
-        raw = resp.text
+        resp = model.generate_content([
+            {"role": "user", "parts": [f"{sys_prompt}\n\n{json.dumps(user_payload, ensure_ascii=False)}"]},
+        ])
+        raw = resp.text.strip()
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"LLM 모델 호출 실패: {e}")
 
-    # 3) JSON 파싱 & 타이틀 길이 보정
+    # 3) JSON 파싱
+    if raw.startswith("```"):
+        raw = re.sub(r"^```(?:json)?\s*", "", raw)
+        raw = re.sub(r"\s*```$", "", raw).strip()
     try:
+        # LLM이 {"local": [...]} 또는 {"global": [...]} 형태로 반환
         data = json.loads(raw)
-        # title 30자 규칙 보정 (너무 길게 오면 자르기)
-        for item in data:
-            if "title" in item and isinstance(item["title"], str) and len(item["title"]) > 30:
-                item["title"] = item["title"][:30]
     except Exception:
-        raise HTTPException(status_code=502, detail="추천 프롬프트 응답(JSON) 파싱 실패")
+        # { } 블록 탐색
+        try:
+            start = raw.find("{")
+            end = raw.rfind("}")
+            if start != -1 and end > start:
+                data = json.loads(raw[start:end + 1])
+            else:
+                raise ValueError
+        except Exception:
+            raise HTTPException(status_code=502, detail=f"추천 프롬프트 응답(JSON) 파싱 실패: {raw[:200]}")
 
-    # 4) Pydantic 유효성 검사
-    try:
-        validated = RecommendedPromptList.validate(data)
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"추천 프롬프트 응답 스키마 불일치: {e}")
+    # LLM이 반환한 키(local/global) 에서 실제 리스트 추출
+    items: list = data.get("local") or data.get("global") or []
 
-    return validated
+    # 4) id 부여 및 title 30자 보정
+    result_items = []
+    for idx, item in enumerate(items, start=1):
+        title = item.get("title", "")[:30]
+        content = item.get("content", "")
+        result_items.append({"id": idx, "title": title, "content": content})
+
+    return {response_key: result_items}
 
 """
 @router.post(path="/analyze-prompt1", summary="사용자가 입력한 프롬프트를 분석하여 개선안을 제안")
