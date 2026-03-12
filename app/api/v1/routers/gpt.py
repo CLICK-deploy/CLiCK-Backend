@@ -21,19 +21,17 @@ genai.configure(api_key=settings.GEMMA_API_KEY)
 @router.post(path="/trace_input", summary="유저 질문 수집 -> 유저의 관심사 파악")
 def trace_input_prompt(in_: RoomTrace, db:Session = Depends(get_db)):
     if not user_service.is_exist_user(in_.userID, db):
-        user_service.create_user(in_.userID, db)
+        raise HTTPException(status_code=401, detail="로그인이 필요합니다.")
 
-    new_history = history_service.create_history(in_, 'user', db)
-
+    history_service.create_history(in_, 'user', db)
     return {"status": "success"}
 
 @router.post(path="/trace_output_prompt", summary="ai 답변 수집 -> 유저의 관심사 파악")
 def trace_output_prompt(in_: RoomTrace, db:Session = Depends(get_db)):
     if not user_service.is_exist_user(in_.userID, db):
-        user_service.create_user(in_.userID, db)
+        raise HTTPException(status_code=401, detail="로그인이 필요합니다.")
 
-    new_history = history_service.create_history(in_, 'ai', db)
-
+    history_service.create_history(in_, 'ai', db)
     return {"status": "success"}
 
 @router.post("/recommended-prompts", summary="유저별 관심사 기반 추천 프롬프트 1개 생성",

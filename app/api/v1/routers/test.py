@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Dict, List
+from typing import Dict, List, Optional
 from app.core.config import settings
 from app.core.prompts.prompt_loader import IMPROVE_SYS_PROMPT
 from app.services import user_service, event_service
@@ -22,13 +22,13 @@ genai.configure(api_key=settings.GEMMA_API_KEY)
 # -----------------------------
 class AnalyzePromptRequest(BaseModel):
     userID: str
-    chatID: str
+    chatID: Optional[str] = None
     prompt: str
 
 
 class AnalyzePromptResponse(BaseModel):
     tags: List[str]
-    patches: Dict[str, dict]
+    patches: Dict[str, List[dict]]
     full_suggestion: str
 
 
@@ -63,9 +63,9 @@ def coerce_json_from_text(text: str) -> dict:
     response_model=AnalyzePromptResponse,
 )
 async def analyze_prompt(in_: AnalyzePromptRequest, db: Session = Depends(get_db)):
-    # 1) 유저 존재 여부 확인 및 생성
+    # 1) 유저 존재 여부 확인
     if not user_service.is_exist_user(in_.userID, db):
-        user_service.create_user(in_.userID, db)
+        raise HTTPException(status_code=401, detail="로그인이 필요합니다.")
 
     # 2) LLM 호출
     try:
@@ -73,7 +73,7 @@ async def analyze_prompt(in_: AnalyzePromptRequest, db: Session = Depends(get_db
             model_name="gemini-2.5-flash",
             generation_config=genai.GenerationConfig(
                 temperature=0.3,
-                max_output_tokens=2048,
+                max_output_tokens=8192,
                 response_mime_type="application/json",
             ),
         )
@@ -95,12 +95,12 @@ async def analyze_prompt(in_: AnalyzePromptRequest, db: Session = Depends(get_db
     # 스펙은 patches를 dict로: {"tag_name": {"from":..,"to":..}}
     raw_patches: list = parsed.get("patches", [])
     tags: List[str] = []
-    patches: Dict[str, dict] = {}
+    patches: Dict[str, List[dict]] = {}
     for p in raw_patches:
         tag = p.get("tag", "")
         if tag and tag not in tags:
             tags.append(tag)
-        patches[tag] = {"from": p.get("from", ""), "to": p.get("to", "")}
+        patches.setdefault(tag, []).append({"from": p.get("from", ""), "to": p.get("to", "")})
 
     full_suggestion: str = parsed.get("full_suggestion", in_.prompt)
 

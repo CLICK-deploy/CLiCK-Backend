@@ -5,45 +5,38 @@ from app.schemas.gpt import RoomTrace
 from typing import Sequence
 from sqlalchemy import select, and_
 
+def _get_user(nickname: str, db: Session):
+    return db.execute(select(User).where(User.nickname == nickname)).scalar()
+
 def create_history(in_: RoomTrace, role:MessageRole, db:Session):
-    if role == MessageRole.USER.value:
-        query = select(User).where(User.device_uuid == in_.userID)
-        user = db.execute(query).scalar()
+    user = _get_user(in_.userID, db)
+    if user is None:
+        return None
 
-        new_history = History(
-                user_id=user.user_id,
-                room_id=in_.chatID,
-                role=MessageRole.USER.value,
-                topic=in_.prompt)
-        db.add(new_history)
-        db.commit()
-        db.refresh(new_history)
-        return new_history
-    else:
-        query = select(User).where(User.device_uuid == in_.userID)
-        user = db.execute(query).scalar()
-
-        new_history = History(
+    role_value = MessageRole.USER.value if role == MessageRole.USER.value else MessageRole.AI
+    new_history = History(
             user_id=user.user_id,
             room_id=in_.chatID,
-            role=MessageRole.AI,
+            role=role_value,
             topic=in_.prompt)
-        db.add(new_history)
-        db.commit()
-        db.refresh(new_history)
-        return new_history
+    db.add(new_history)
+    db.commit()
+    db.refresh(new_history)
+    return new_history
 
 
 def get_histories(user_id: str, room_id: str, db: Session):
-    query = select(User).where(User.device_uuid == user_id)
-    user = db.execute(query).scalar()
+    user = _get_user(user_id, db)
+    if user is None:
+        return []
     query = select(History).where(and_(History.user_id == user.user_id, History.room_id == room_id)).order_by(History.created_at.desc()).limit(10)
     histories : Sequence[History] = db.execute(query).scalars().all()
     return histories
 
 def get_histories_new(user_id: str, db: Session):
-    query = select(User).where(User.device_uuid == user_id)
-    user = db.execute(query).scalar()
+    user = _get_user(user_id, db)
+    if user is None:
+        return []
     query = select(History).where(History.user_id == user.user_id).order_by(
         History.created_at.desc()).limit(10)
     histories: Sequence[History] = db.execute(query).scalars().all()

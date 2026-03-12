@@ -39,11 +39,7 @@ class CheckDuplicateResponse(BaseModel):
 # -----------------------------
 # Endpoints
 # -----------------------------
-@router.post(
-    "/signup",
-    summary="회원가입",
-    response_model=AuthResponse,
-)
+@router.post("/signup", summary="회원가입",response_model=AuthResponse,)
 def signup(in_: SignupRequest, db: Session = Depends(get_db)):
     if not in_.userId or not in_.userId.strip():
         raise HTTPException(status_code=400, detail="userId is required")
@@ -63,11 +59,7 @@ def signup(in_: SignupRequest, db: Session = Depends(get_db)):
     return AuthResponse(userID=user.nickname, message="Signup successful")
 
 
-@router.post(
-    "/login",
-    summary="로그인",
-    response_model=AuthResponse,
-)
+@router.post("/login", summary="로그인", response_model=AuthResponse,)
 def login(in_: LoginRequest, db: Session = Depends(get_db)):
     if not in_.userId or not in_.userId.strip():
         raise HTTPException(status_code=400, detail="userId is required")
@@ -83,11 +75,7 @@ def login(in_: LoginRequest, db: Session = Depends(get_db)):
     return AuthResponse(userID=user.nickname, message="Login successful")
 
 
-@router.post(
-    "/check-duplicate",
-    summary="닉네임 중복 확인",
-    response_model=CheckDuplicateResponse,
-)
+@router.post("/check-duplicate", summary="닉네임 중복 확인", response_model=CheckDuplicateResponse,)
 def check_duplicate(in_: CheckDuplicateRequest, db: Session = Depends(get_db)):
     if not in_.userId or not in_.userId.strip():
         raise HTTPException(status_code=400, detail="userId is required")

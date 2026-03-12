@@ -4,17 +4,9 @@ from app.core.security import hash_password, verify_password
 from sqlalchemy import select
 from typing import Optional
 
-def is_exist_user(user_id: str, db: Session) -> bool:
-    query = select(User).where(User.device_uuid == user_id)
-    user = db.execute(query).scalar()
-    return user is not None
-
-def create_user(user_id: str, db: Session):
-    new_user = User(device_uuid=user_id)
-    db.add(new_user)
-    db.commit()
-    db.refresh(new_user)
-    print(f"created users : {new_user.user_id}")
+def is_exist_user(nickname: str, db: Session) -> bool:
+    query = select(User).where(User.nickname == nickname)
+    return db.execute(query).scalar() is not None
 
 def is_nickname_taken(nickname: str, db: Session) -> bool:
     query = select(User).where(User.nickname == nickname)
