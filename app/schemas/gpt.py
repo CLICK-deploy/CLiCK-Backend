@@ -3,13 +3,13 @@ from pydantic.types import StringConstraints, UUID
 from typing import Optional, Annotated
 
 class RoomTrace(BaseModel):
-    user_id: str
-    room_id: str
-    input_prompt: str
+    userID: str
+    chatID: str
+    prompt: str
 
 class RecommendInput(BaseModel):
-    user_id: str
-    room_id: Optional[str]
+    userID: str
+    chatID: Optional[str] = None
 
 class Patch(BaseModel):
     tag: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
@@ -53,8 +53,8 @@ class outputPrompt(BaseModel):
         return self
 
 class RecommendedPrompt(BaseModel):
-    id: UUID
+    id: int
     title: str
     content: str
 
-RecommendedPromptList = Annotated[list[RecommendedPrompt], Field(min_length=1, max_length=3)] # list[RecommendedPrompt] = Field(min_length=1, max_length=3)
+RecommendedPromptList = Annotated[list[RecommendedPrompt], Field(min_length=1, max_length=3)]

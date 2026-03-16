@@ -20,9 +20,12 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     """Upgrade schema."""
-    op.add_column('histories', sa.Column('role', sa.Enum('USER', 'AI', name='message_role'), nullable=False, server_default='USER'))
+    message_role = sa.Enum('USER', 'AI', name='message_role')
+    message_role.create(op.get_bind(), checkfirst=True)
+    op.add_column('histories', sa.Column('role', message_role, nullable=False, server_default='USER'))
 
 
 def downgrade() -> None:
     """Downgrade schema."""
     op.drop_column('histories', 'role')
+    sa.Enum(name='message_role').drop(op.get_bind(), checkfirst=True)
