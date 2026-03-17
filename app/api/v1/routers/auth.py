@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from typing import Optional
 from app.db.session import get_db
 from app.services import user_service
+from app.core.security import create_jwt
 
 router = APIRouter(prefix="")
 
@@ -24,6 +25,9 @@ class LoginRequest(BaseModel):
 
 
 class AuthResponse(BaseModel):
+    access_token: str
+    refresh_token: str
+    token_type: str
     userID: str
     message: str
 
@@ -56,7 +60,16 @@ def signup(in_: SignupRequest, db: Session = Depends(get_db)):
     if user is None:
         raise HTTPException(status_code=409, detail="이미 사용 중인 닉네임입니다.")
 
-    return AuthResponse(userID=user.nickname, message="Signup successful")
+    access_token = create_jwt(user.nickname, 60)
+    refresh_token = create_jwt(user.nickname, 25920, True)
+
+    return AuthResponse(
+        access_token=access_token,
+        refresh_token=refresh_token,
+        token_type="Bearer",
+        userID=user.nickname, 
+        message="Signup successful"
+    )
 
 
 @router.post("/login", summary="로그인", response_model=AuthResponse,)
@@ -72,7 +85,16 @@ def login(in_: LoginRequest, db: Session = Depends(get_db)):
     if user is None:
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
-    return AuthResponse(userID=user.nickname, message="Login successful")
+    access_token = create_jwt(user.nickname, 60)
+    refresh_token = create_jwt(user.nickname, 25920, True)
+
+    return AuthResponse(
+        access_token=access_token,
+        refresh_token=refresh_token,
+        token_type="Bearer",
+        userID=user.nickname, 
+        message="Login successful"
+    )
 
 
 @router.post("/check-duplicate", summary="닉네임 중복 확인", response_model=CheckDuplicateResponse,)

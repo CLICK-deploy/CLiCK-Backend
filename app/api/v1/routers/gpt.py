@@ -1,5 +1,3 @@
-# TODO: max_tokens&temperature 조정할 것
-
 import json
 import re
 from typing import Dict, List
@@ -8,14 +6,14 @@ from app.core.prompts.prompt_loader import IMPROVE_SYS_PROMPT, REC_SYS_PROMPT1, 
 from app.schemas.gpt import RoomTrace, RecommendInput
 from sqlalchemy.orm import Session
 from fastapi import APIRouter, HTTPException, Depends
-import google.generativeai as genai
+from huggingface_hub import InferenceClient
 from app.services import user_service, event_service, history_service
 from app.db.session import get_db
 from app.services.history_service import create_history, get_histories, get_histories_new
 
 router = APIRouter(prefix="")
 
-genai.configure(api_key=settings.GEMMA_API_KEY)
+client = InferenceClient(api_key=settings.GEMMA_API_KEY)
 
 
 @router.post(path="/trace_input", summary="유저 질문 수집 -> 유저의 관심사 파악")
@@ -59,18 +57,16 @@ async def get_recommend_prompts(in_: RecommendInput, db: Session = Depends(get_d
     user_payload = {"topics": topics}
 
     try:
-        model = genai.GenerativeModel(
-            model_name="gemini-2.5-flash",
-            generation_config=genai.GenerationConfig(
-                temperature=0.4,
-                max_output_tokens=5000,
-                response_mime_type="application/json",
-            ),
+        resp = client.chat_completion(
+            model="gemma-3-1b-it",
+            messages=[
+                {"role": "system", "content": sys_prompt},
+                {"role": "user", "content": json.dumps(user_payload, ensure_ascii=False)},
+            ],
+            temperature=0.4,
+            max_tokens=5000
         )
-        resp = model.generate_content([
-            {"role": "user", "parts": [f"{sys_prompt}\n\n{json.dumps(user_payload, ensure_ascii=False)}"]},
-        ])
-        raw = resp.text.strip()
+        raw = resp.choices[0].message.content.strip()
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"LLM 모델 호출 실패: {e}")
 
@@ -105,90 +101,11 @@ async def get_recommend_prompts(in_: RecommendInput, db: Session = Depends(get_d
 
     return {response_key: result}
 
+
+
 """
-@router.post(path="/analyze-prompt1", summary="사용자가 입력한 프롬프트를 분석하여 개선안을 제안")
-async def analyze_prompt(in_: InputPrompt, db:Session = Depends(get_db)):
-    if not user_service.is_exist_user(in_.user_id, db):
-        user_service.create_user(in_.user_id, db)
-
-    try:
-        response = client.chat_completion(
-            model="gemma-3-1b-it",
-            messages=[
-                {
-                    "role": "system",
-                    "content": IMPROVE_SYS_PROMPT
-                },{"role": "user", "content": "도커에 대해 설명해줘"},
-                {"role": "assistant", "content": '''
-            {
-  "patches": [
-    { "tag": "문체/스타일 개선", "from": "도커", "to": "Docker", "occurrence": 1 },
-    { "tag": "모호/지시 불명확", "from": "설명해줘", "to": "컨테이너 개념과 이미지/레지스트리 중심으로 설명해줘", "occurrence": 1 }
-  ],
-  "full_suggestion": "Docker에 대해 컨테이너 개념과 이미지/레지스트리 중심으로 설명해줘."
-}
-                '''},
-                {"role": "user", "content": "인공지능에 대해 자세하고 상세하게 설명 해줬스면 좋겠어."},
-                {"role": "assistant", "content": '''{
-            patches: [
-                {“tag”:“모호/지시 불명확”.
-                        “from”: "설명",
-                        “to”: "기본 개념을 3가지 핵심 포인트로 설명"
-                    }
-                ,
-                {“tag”:구조/길이 중복”,
-                        “from”: "자세하고 상세하게",
-                        “to”: "자세하게"
-                    },
-               {“tag”: "오타/맞춤법”:,
-                        “from”: "해줬스면",
-                        “to”: "해주었으면”}
-            ],
-  "full_suggestion": "FastAPI 파일 업로드 단계별 코드 예시와 보안 고려사항을 포함해 알려줘"
-}'''
-},
-                {"role": "user", "content": in_.input_prompt}
-            ],response_format={
-        "type": "json_schema",
-        "json_schema": {
-            "name": "PromptEdit",
-            "strict": True,  # 스키마 강제
-            "schema": {
-                "type": "object",
-                "additionalProperties": False,
-                "properties": {
-                    "patches": {
-                        "type": "array",
-                        "items": {
-                            "type": "object",
-                            "additionalProperties": False,
-                            "properties": {
-                                "tag": { "type": "string", "minLength": 1 },
-                                "from": { "type": "string", "minLength": 1 },
-                                "to":   { "type": "string", "minLength": 1 }
-                            },
-                            "required": ["tag", "from", "to"]
-                        }
-                    },
-                    "full_suggestion": { "type": "string", "minLength": 1 }
-                },
-                "required": ["patches", "full_suggestion"]
-            }
-        }
-    },
-            max_tokens=800,
-            # 필요 시 파라미터: temperature=0.3, max_tokens=800 등
-        )
-
-        raw = response.choices[0].message.content
         res = json.loads(raw)
-        print(raw)
-        # 2) DB 저장 (event)
-        event_service.create_event(in_.user_id, in_.input_prompt, res, db)
-
+   
         # 3) 그대로 클라이언트에 반환(topic/patches/full_suggestion 사용)
         return res
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
 """

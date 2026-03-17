@@ -6,7 +6,8 @@ from typing import Sequence
 from sqlalchemy import select, and_
 
 def _get_user(nickname: str, db: Session):
-    return db.execute(select(User).where(User.nickname == nickname)).scalar()
+    user = db.execute(select(User).where(User.nickname == nickname)).scalar()
+    return user
 
 def create_history(in_: RoomTrace, role:MessageRole, db:Session):
     user = _get_user(in_.userID, db)

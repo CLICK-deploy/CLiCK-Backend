@@ -10,11 +10,11 @@ from app.db.session import get_db
 from sqlalchemy.orm import Session
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
-import google.generativeai as genai
+from huggingface_hub import InferenceClient
 
 router = APIRouter(prefix="")
 
-genai.configure(api_key=settings.GEMMA_API_KEY)
+client = InferenceClient(api_key=settings.GEMMA_API_KEY)
 
 
 # -----------------------------
@@ -69,22 +69,82 @@ async def analyze_prompt(in_: AnalyzePromptRequest, db: Session = Depends(get_db
 
     # 2) LLM 호출
     try:
-        gemini_model = genai.GenerativeModel(
-            model_name="gemini-2.5-flash",
-            generation_config=genai.GenerationConfig(
-                temperature=0.3,
-                max_output_tokens=8192,
-                response_mime_type="application/json",
-            ),
+        resp = client.chat_completion(
+            model="gemma-3-1b-it",
+            messages=[
+                {"role": "system", "content": IMPROVE_SYS_PROMPT},
+
+                # Few-Shot Sample 1
+                {"role": "user", "content": "도커에 대해 설명해줘"},
+                {"role": "assistant", "content": '''
+                    {
+                        "patches": [
+                            { "tag": "문체/스타일 개선", "from": "도커", "to": "Docker", "occurrence": 1 },
+                            { "tag": "모호/지시 불명확", "from": "설명해줘", "to": "컨테이너 개념과 이미지/레지스트리 중심으로 설명해줘.", "occurrence": 1 }
+                        ],
+                        "full_suggestion": "Docker에 대해 컨테이너 개념과 이미지/레지스트리 중심으로 설명해줘."
+                    }
+                '''},
+
+                # Few-Shot Sample 2
+                {"role": "user", "content": "인공지능에 대해 자세하고 상세하게 설명 해줬스면 좋겠어."},
+                {"role": "assistant", "content": '''
+                    {
+                        "patches": [
+                            {“tag”:“모호/지시 불명확”.
+                                “from”: "설명",
+                                “to”: "기본 개념을 3가지 핵심 포인트로 설명"
+                            },
+                            {“tag”:구조/길이 중복”,
+                                “from”: "자세하고 상세하게",
+                                “to”: "자세하게"
+                            },
+                            {“tag”: "오타/맞춤법”:,
+                                “from”: "해줬스면",
+                                “to”: "해주었으면”
+                            }
+                        ],
+                        "full_suggestion": "인공지능에 대해 자세하게 기본 개념을 3가지 핵심 포인트로 설명 해주었으면 좋겠어."
+                    }
+                '''},
+
+                {"role": "user", "content": in_.prompt},
+            ], response_format={
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "PromptEdit",
+                    "strict": True,  # 스키마 강제
+                    "schema": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": {
+                            "patches": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "additionalProperties": False,
+                                    "properties": {
+                                        "tag": { "type": "string", "minLength": 1 },
+                                        "from": { "type": "string", "minLength": 1 },
+                                        "to":   { "type": "string", "minLength": 1 }
+                                    },
+                                    "required": ["tag", "from", "to"]
+                                }
+                            },
+                            "full_suggestion": { "type": "string", "minLength": 1 }
+                        },
+                        "required": ["patches", "full_suggestion"]
+                    }
+                }
+            },
+            temperature=0.3,
+            max_tokens=8192
         )
-        response = gemini_model.generate_content([
-            {"role": "user", "parts": [f"{IMPROVE_SYS_PROMPT}\n\n{in_.prompt}"]},
-        ])
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"LLM API 연동 에러: {e}")
 
     # 3) 응답 파싱
-    raw_text = response.text.strip()
+    raw_text = resp.choices[0].message.content.strip()
     try:
         parsed = coerce_json_from_text(raw_text)
     except ValueError:
