@@ -185,3 +185,4 @@ websockets==15.0.1
     # via uvicorn
 google-ai-generativelanguage==0.6.15
 psycopg2-binary
+bcrypt

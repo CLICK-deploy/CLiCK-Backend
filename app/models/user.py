@@ -17,7 +17,7 @@ class User(Base):
 
     user_id = Column(Integer, primary_key=True, autoincrement=True)
     device_uuid = Column(String(36), unique=True)
-    nickname = Column(String(20), unique=True, index=True, nullable=True, unique=True)
+    nickname = Column(String(20), unique=True, index=True, nullable=True)
     password = Column(String(255), nullable=True)
     gender = Column(String(10), nullable=True)
     age = Column(String(10), nullable=True)
