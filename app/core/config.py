@@ -9,8 +9,8 @@ class Settings(BaseSettings):
     # .env에서 읽힐 실제 필드들
     GEMMA_API_KEY: str
     DATABASE_URL: str
-    # SECRET_KEY: str
-    # REFRESH_SECRET_KEY: str
+    ACCESS_SECRET_KEY: str = "change-me-access-secret"
+    REFRESH_SECRET_KEY: str = "change-me-refresh-secret"
 
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
     REFRESH_TOKEN_EXPIRE_DAYS: int = 14

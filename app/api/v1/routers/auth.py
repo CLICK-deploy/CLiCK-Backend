@@ -1,3 +1,4 @@
+from datetime import timedelta
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -60,8 +61,8 @@ def signup(in_: SignupRequest, db: Session = Depends(get_db)):
     if user is None:
         raise HTTPException(status_code=409, detail="이미 사용 중인 닉네임입니다.")
 
-    access_token = create_jwt(user.nickname, 60)
-    refresh_token = create_jwt(user.nickname, 25920, True)
+    access_token = create_jwt(user.nickname, expires_delta=timedelta(minutes=60))
+    refresh_token = create_jwt(user.nickname, expires_delta=timedelta(minutes=25920), refresh=True)
 
     return AuthResponse(
         access_token=access_token,
@@ -85,8 +86,8 @@ def login(in_: LoginRequest, db: Session = Depends(get_db)):
     if user is None:
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
-    access_token = create_jwt(user.nickname, 60)
-    refresh_token = create_jwt(user.nickname, 25920, True)
+    access_token = create_jwt(user.nickname, expires_delta=timedelta(minutes=60))
+    refresh_token = create_jwt(user.nickname, expires_delta=timedelta(minutes=25920), refresh=True)
 
     return AuthResponse(
         access_token=access_token,
