@@ -4,12 +4,14 @@ from typing import Dict, List
 from app.core.config import settings
 from app.core.prompts.prompt_loader import IMPROVE_SYS_PROMPT, REC_SYS_PROMPT1, REC_SYS_PROMPT2
 from app.schemas.gpt import RoomTrace, RecommendInput
+from app.models.user import User
 from sqlalchemy.orm import Session
 from fastapi import APIRouter, HTTPException, Depends
 from huggingface_hub import InferenceClient
 from app.services import user_service, event_service, history_service
 from app.db.session import get_db
 from app.services.history_service import create_history, get_histories, get_histories_new
+from app.core.security import get_current_user
 
 router = APIRouter(prefix="")
 
@@ -17,33 +19,27 @@ client = InferenceClient(api_key=settings.GEMMA_API_KEY)
 
 
 @router.post(path="/trace_input", summary="유저 질문 수집 -> 유저의 관심사 파악")
-def trace_input_prompt(in_: RoomTrace, db:Session = Depends(get_db)):
-    if not user_service.is_exist_user(in_.userID, db):
-        raise HTTPException(status_code=401, detail="로그인이 필요합니다.")
-
-    history_service.create_history(in_, 'user', db)
+def trace_input_prompt(in_: RoomTrace, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    history_service.create_history(in_, 'user', current_user.user_id, db)
     return {"status": "success"}
 
 @router.post(path="/trace_output_prompt", summary="ai 답변 수집 -> 유저의 관심사 파악")
-def trace_output_prompt(in_: RoomTrace, db:Session = Depends(get_db)):
-    if not user_service.is_exist_user(in_.userID, db):
-        raise HTTPException(status_code=401, detail="로그인이 필요합니다.")
-
-    history_service.create_history(in_, 'ai', db)
+def trace_output_prompt(in_: RoomTrace, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    history_service.create_history(in_, 'ai', current_user.user_id, db)
     return {"status": "success"}
 
 @router.post("/recommended-prompts", summary="유저별 관심사 기반 추천 프롬프트 1개 생성",
              response_model=Dict[str, dict])
-async def get_recommend_prompts(in_: RecommendInput, db: Session = Depends(get_db)):
+async def get_recommend_prompts(in_: RecommendInput, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     # 1) 조건에 따른 히스토리 조회 및 시스템 프롬프트 할당
     if in_.chatID is None:
         # 새 채팅 — 전체 히스토리 기반, global 키 사용
-        histories = get_histories_new(in_.userID, db)
+        histories = get_histories_new(current_user.user_id, db)
         sys_prompt = REC_SYS_PROMPT2
         response_key = "global"
     else:
         # 기존 채팅방
-        histories = get_histories(in_.userID, in_.chatID, db)
+        histories = get_histories(current_user.user_id, in_.chatID, db)
         sys_prompt = REC_SYS_PROMPT1
         response_key = in_.chatID
 

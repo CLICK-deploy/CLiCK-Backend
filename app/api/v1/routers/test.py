@@ -7,10 +7,12 @@ from app.core.config import settings
 from app.core.prompts.prompt_loader import IMPROVE_SYS_PROMPT
 from app.services import user_service, event_service
 from app.db.session import get_db
+from app.models.user import User
 from sqlalchemy.orm import Session
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from huggingface_hub import InferenceClient
+from app.core.security import get_current_user
 
 router = APIRouter(prefix="")
 
@@ -21,7 +23,6 @@ client = InferenceClient(api_key=settings.GEMMA_API_KEY)
 # Request / Response Schemas
 # -----------------------------
 class AnalyzePromptRequest(BaseModel):
-    userID: str
     chatID: Optional[str] = None
     prompt: str
 
@@ -62,10 +63,8 @@ def coerce_json_from_text(text: str) -> dict:
     summary="사용자가 입력한 프롬프트를 분석하여 개선안을 제안",
     response_model=AnalyzePromptResponse,
 )
-async def analyze_prompt(in_: AnalyzePromptRequest, db: Session = Depends(get_db)):
-    # 1) 유저 존재 여부 확인
-    if not user_service.is_exist_user(in_.userID, db):
-        raise HTTPException(status_code=401, detail="로그인이 필요합니다.")
+async def analyze_prompt(in_: AnalyzePromptRequest, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    # 1) 유저 존재 여부는 토큰으로 보장됨
 
     # 2) LLM 호출
     try:
@@ -167,7 +166,7 @@ async def analyze_prompt(in_: AnalyzePromptRequest, db: Session = Depends(get_db
     # 5) DB 저장 (실패해도 응답은 반환)
     try:
         event_service.create_event(
-            in_.userID,
+            current_user.user_id,
             in_.prompt,
             {"improved_prompt": full_suggestion, "task_type": ", ".join(tags)},
             db,

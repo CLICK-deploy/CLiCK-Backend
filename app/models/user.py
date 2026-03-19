@@ -7,8 +7,8 @@ from enum import Enum as PyEnum
 from sqlalchemy import Enum as SQLAlchemyEnum
 
 class Grade(PyEnum):
-    GENERAL = "general"
-    VIP = "vip"
+    GENERAL = "GENERAL"
+    VIP = "VIP"
 
 class User(Base):
     __tablename__ = "users"
@@ -23,7 +23,7 @@ class User(Base):
     age = Column(String(10), nullable=True)
     grade = Column(SQLAlchemyEnum(Grade), nullable=True, default=Grade.GENERAL)
     lastLogin = Column(DateTime, nullable=True)
-    created_at = Column(DateTime, server_default=func.now(), nullable=False)
+    created_at = Column(DateTime, server_default=func.current_timestamp(), nullable=False)
 
     events = relationship("Event", back_populates="user")
     histories = relationship("History", back_populates="user")

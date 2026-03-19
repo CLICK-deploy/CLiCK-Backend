@@ -3,12 +3,10 @@ from pydantic.types import StringConstraints, UUID
 from typing import Optional, Annotated
 
 class RoomTrace(BaseModel):
-    userID: str
     chatID: str
     prompt: str
 
 class RecommendInput(BaseModel):
-    userID: str
     chatID: Optional[str] = None
 
 class Patch(BaseModel):

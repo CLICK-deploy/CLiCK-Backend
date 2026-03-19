@@ -15,7 +15,7 @@ class History(Base):
     role = Column(SAEnum(MessageRole, name='message_role'), nullable=False, server_default='user')
     # 일단 나중에 생각해봐요: topic 분리 방식
     topic = Column(String(255), nullable=False)
-    created_at = Column(DateTime, server_default=func.now())
+    created_at = Column(DateTime, server_default=func.current_timestamp())
 
     user = relationship("User", back_populates="histories")
 

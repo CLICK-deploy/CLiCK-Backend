@@ -1,20 +1,12 @@
 from app.models.event import Event
-from app.models.user import User
 from sqlalchemy.orm import Session
 from fastapi import HTTPException
-from sqlalchemy import select
 
 
-def create_event(user_id:str, input_prompt, result, db:Session) -> Event:
-    user = db.execute(
-        select(User).where(User.device_uuid == user_id)
-    ).scalar_one_or_none()
-    if user is None:
-        raise HTTPException(status_code=404, detail="존재하지 않는 user_id")
-
+def create_event(user_id: int, input_prompt: str, result: dict, db: Session) -> Event:
     fixed_prompt = result.get("improved_prompt") or result.get("full_suggestion", "")
     reason = result.get("task_type") or ""
-    new_event = Event(user_id=user.user_id,
+    new_event = Event(user_id=user_id,
                       input_prompt=input_prompt,
                       fixed_prompt=fixed_prompt[:255],
                       reason=reason[:255])
