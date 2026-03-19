@@ -1,5 +1,7 @@
 ### ※ 참고 사항: "건가", "이유는", "이유는?", "이유" 등으로 끝나는 거 다 의문점이 맞고 원래 거 쓰는 거로 고치고 싶은 거임. 
 새로운 더 효율적인 거 있으면 그거로 고치고 그러고 싶어서 그러는 거 ㅇㅇ. 지금 해둔 거 다 의미있으면 그대로 편하게 넘어가버리고 싶은 거도 있고
+### ※ 참고 사항(코드적): expires_in 추가하고 여러모로 건들긴 했으니까 읽어는 보고, is_exist_user&is_nickname_taken 마냥 효율 깎는 거 잘 찾아보고 중복들도 지워두고.
+### ※ 참고 사항(코드적): frontend에 userID랑 access_token이랑 같이 저장할 필요는 없을 거임. 다 처리하려고 만든 JWT 토큰만 access_token, refresh_token 이런 거일 테니까. 그리고 또 signup에서 Internal Server Error 500 뜬다 나머지들 다 확인하고 다른 사람 거로 확인은 해야겠지만.
 
 ## requirements.txt, pyproject.toml
 - bcrypt, google-generativeai, psycopg2-library 다 바꿔도 되는 건가
@@ -52,3 +54,4 @@
 
 ## app/services/user_service.py
 - is_exist_user 그대로 두고 check_duplicate도 그대로 두는 건가
+- is_exist_user랑 is_nickname_taken이랑 같은 함수라 퉁쳐도 될 거 같음
