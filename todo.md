@@ -1,4 +1,5 @@
-# ※ 참고 사항: "건가", "이유는", "이유는?", "이유" 등으로 끝나는 거 다 의문점이 맞고 원래 거 쓰는 거로 고치고 싶은 거임. 새로운 더 효율적인 거 있으면 그거로 고치고 그러고 싶어서 그러는 거 ㅇㅇ 지금 해둔 거 다 의미있으면 그대로 편하게 넘어가버리고 싶은 거도 있고
+### ※ 참고 사항: "건가", "이유는", "이유는?", "이유" 등으로 끝나는 거 다 의문점이 맞고 원래 거 쓰는 거로 고치고 싶은 거임. 
+새로운 더 효율적인 거 있으면 그거로 고치고 그러고 싶어서 그러는 거 ㅇㅇ. 지금 해둔 거 다 의미있으면 그대로 편하게 넘어가버리고 싶은 거도 있고
 
 ## requirements.txt, pyproject.toml
 - bcrypt, google-generativeai, psycopg2-library 다 바꿔도 되는 건가
@@ -20,7 +21,7 @@
 - 원래 코드에서 fixed_prompt[:255]나 fixed_prompt = result.get("improved_prompt") 이런 것들로 바꾼 이유
 
 ## alembic/env.py
-- """Run migration in 'offline' mode.~""" 주석이 지워지고 """Run migrations in 'online' mode.~" 주석이 지워지고 일부러 지운건가
+- """Run migration in 'offline' mode.(하고 나머지 내용)""" 주석이 지워지고 """Run migrations in 'online' mode.(하고 나머지 내용)""" 주석이 지워지고 일부러 지운건가
 - 라이브러리 import 상단으로 옮겨주고 config.set_main_option을 지워서 뭐로 어케 바꾼건지&settings.DATABASE_URL 이런 거 말고 그냥 DATABASE_URL로 해도 되는 거 아닌가
 
 ## alembic/versions/06e990cb07eb_add_role_to_histories_table.py
@@ -31,9 +32,10 @@
 
 
 
+# 마지막 필수 전달사항
 ## 구글 docs, 기능정의서 참고해서 추가기능들 구현
 - https://docs.google.com/document/d/1V9flFbFdSxqGwn8ztWwXvtxAC_EjOTpPwFmaNVvMWQY/edit?tab=t.v0fzxa4wo64p#heading=h.rk8ohwvg9zpm
-- 
+- https://docs.google.com/spreadsheets/d/1274NpbXueSE6YXW4-D1YAzOI0u6kFPhbjSQSBRZ1zN0/edit?gid=0#gid=0 
 - 복잡한 문장 / 간단한 문장 구분 및 처리 분할, 무료 버전 시 횟수 제한&사용 가능한 템플릿 제작 등등
 - 주석, 에러 같은 거 한국어로 바꿀 수 있으면 바꿔주고, db도 언급한 식으로 수정 가능하면 수정하고, 인증부도 token 사용하는 방식으로 바꾸고, refresh_token 이용해서 refresh 엔드포인트에서 토큰 새로고침하고, token secret key .env 설정에 넣고 사용할 수 있게 해주면 좋겠고 등등
 
