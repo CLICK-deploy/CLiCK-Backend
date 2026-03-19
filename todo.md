@@ -36,7 +36,7 @@
 ## 구글 docs, 기능정의서 참고해서 추가기능들 구현
 - https://docs.google.com/document/d/1V9flFbFdSxqGwn8ztWwXvtxAC_EjOTpPwFmaNVvMWQY/edit?tab=t.v0fzxa4wo64p#heading=h.rk8ohwvg9zpm
 - https://docs.google.com/spreadsheets/d/1274NpbXueSE6YXW4-D1YAzOI0u6kFPhbjSQSBRZ1zN0/edit?gid=0#gid=0 
-- 복잡한 문장 / 간단한 문장 구분 및 처리 분할, 무료 버전 시 횟수 제한&사용 가능한 템플릿 제작 등등
+- 복잡한 문장 / 간단한 문장 구분 및 처리 분할, 무료 버전 시 횟수 제한&사용 가능한 템플릿 제작, UI 수정(클릭 버튼 눌렀을 때 뜨는 거도 overflow 자동으로 들어가서 너무 길어지지 않게, 폴더나 방? 속에 있는 거도 제대로 동작하게, 메인 화면에서도 렌더링되고, 로그인은 바로 로그인 안 하게 하는 게 맞는 거 같기도? 그 버튼 누르면 관련해서 다 뜨는데 조건 붙여서 렌더링하고 이런 식으로 등) 등등
 - 주석, 에러 같은 거 한국어로 바꿀 수 있으면 바꿔주고, db도 언급한 식으로 수정 가능하면 수정하고, 인증부도 token 사용하는 방식으로 바꾸고, refresh_token 이용해서 refresh 엔드포인트에서 토큰 새로고침하고, token secret key .env 설정에 넣고 사용할 수 있게 해주면 좋겠고 등등
 
 
