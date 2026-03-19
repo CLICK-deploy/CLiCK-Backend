@@ -54,7 +54,7 @@ async def get_recommend_prompts(in_: RecommendInput, db: Session = Depends(get_d
 
     try:
         resp = client.chat_completion(
-            model="gemma-3-1b-it",
+            model="google/gemma-3-1b-it",
             messages=[
                 {"role": "system", "content": sys_prompt},
                 {"role": "user", "content": json.dumps(user_payload, ensure_ascii=False)},

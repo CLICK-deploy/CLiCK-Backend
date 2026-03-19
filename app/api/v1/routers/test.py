@@ -69,7 +69,7 @@ async def analyze_prompt(in_: AnalyzePromptRequest, db: Session = Depends(get_db
     # 2) LLM 호출
     try:
         resp = client.chat_completion(
-            model="gemma-3-1b-it",
+            model="google/gemma-3-1b-it",
             messages=[
                 {"role": "system", "content": IMPROVE_SYS_PROMPT},
 
