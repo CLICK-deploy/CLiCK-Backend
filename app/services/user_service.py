@@ -24,11 +24,6 @@ def signup(nickname: str, password: str, age_group: Optional[str], gender: Optio
     return new_user
 
 
-def is_nickname_taken(nickname: str, db: Session) -> bool:
-    user = db.execute(select(User).where(User.nickname == nickname)).scalar()
-    return user is not None
-
-
 def login_user(nickname: str, password: str, db: Session) -> Optional[User]:
     """로그인. 닉네임 없거나 비밀번호 불일치 시 None 반환."""
     user = db.execute(select(User).where(User.nickname == nickname)).scalar()

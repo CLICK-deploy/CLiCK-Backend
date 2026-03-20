@@ -63,13 +63,13 @@ def signup(in_: SignupRequest, db: Session = Depends(get_db)):
     if user is None:
         raise HTTPException(status_code=409, detail="이미 사용 중인 닉네임입니다.")
 
-    access_token = create_jwt(user.nickname, expires_delta=timedelta(minutes=settings.access_expires))
-    refresh_token = create_jwt(user.nickname, expires_delta=timedelta(minutes=settings.access_expires * settings.refresh_expires * 24), refresh=True)
+    access_token = create_jwt(user.nickname, expires_delta=timedelta(minutes=60))
+    refresh_token = create_jwt(user.nickname, expires_delta=timedelta(minutes=25920), refresh=True)
 
     return AuthResponse(
         access_token=access_token,
         refresh_token=refresh_token,
-        expires_in=settings.access_expires,
+        expires_in=60,
         token_type="Bearer",
         userID=user.nickname, 
         message="Signup successful"
@@ -89,13 +89,13 @@ def login(in_: LoginRequest, db: Session = Depends(get_db)):
     if user is None:
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
-    access_token = create_jwt(user.nickname, expires_delta=timedelta(minutes=settings.access_expires))
-    refresh_token = create_jwt(user.nickname, expires_delta=timedelta(minutes=settings.access_expires * settings.refresh_expires * 24), refresh=True)
+    access_token = create_jwt(user.nickname, expires_delta=timedelta(minutes=60))
+    refresh_token = create_jwt(user.nickname, expires_delta=timedelta(minutes=25920), refresh=True)
 
     return AuthResponse(
         access_token=access_token,
         refresh_token=refresh_token,
-        expires_in=settings.access_expires,
+        expires_in=60,
         token_type="Bearer",
         userID=user.nickname, 
         message="Login successful"
@@ -107,6 +107,6 @@ def check_duplicate(in_: CheckDuplicateRequest, db: Session = Depends(get_db)):
     if not in_.userId or not in_.userId.strip():
         raise HTTPException(status_code=400, detail="userId is required")
 
-    taken = user_service.is_nickname_taken(in_.userId.strip(), db)
+    taken = user_service.is_exist_user(in_.userId.strip(), db)
     return CheckDuplicateResponse(available=not taken)
 

@@ -15,7 +15,10 @@ from app.core.security import get_current_user
 
 router = APIRouter(prefix="")
 
-client = InferenceClient(api_key=settings.GEMMA_API_KEY)
+client = InferenceClient(
+    provider="scaleway",
+    api_key=settings.GEMMA_API_KEY
+)
 
 
 @router.post(path="/trace_input", summary="유저 질문 수집 -> 유저의 관심사 파악")
@@ -54,13 +57,13 @@ async def get_recommend_prompts(in_: RecommendInput, db: Session = Depends(get_d
 
     try:
         resp = client.chat_completion(
-            model="google/gemma-3-1b-it",
+            model="google/gemma-3-27b-it",
             messages=[
                 {"role": "system", "content": sys_prompt},
                 {"role": "user", "content": json.dumps(user_payload, ensure_ascii=False)},
             ],
             temperature=0.4,
-            max_tokens=5000
+            max_tokens=1024
         )
         raw = resp.choices[0].message.content.strip()
     except Exception as e:

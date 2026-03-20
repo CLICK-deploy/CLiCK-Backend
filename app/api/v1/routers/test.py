@@ -16,7 +16,10 @@ from app.core.security import get_current_user
 
 router = APIRouter(prefix="")
 
-client = InferenceClient(api_key=settings.GEMMA_API_KEY)
+client = InferenceClient(
+    provider="scaleway",
+    api_key=settings.GEMMA_API_KEY
+)
 
 
 # -----------------------------
@@ -69,7 +72,7 @@ async def analyze_prompt(in_: AnalyzePromptRequest, db: Session = Depends(get_db
     # 2) LLM 호출
     try:
         resp = client.chat_completion(
-            model="google/gemma-3-1b-it",
+            model="google/gemma-3-27b-it",
             messages=[
                 {"role": "system", "content": IMPROVE_SYS_PROMPT},
 
@@ -78,8 +81,16 @@ async def analyze_prompt(in_: AnalyzePromptRequest, db: Session = Depends(get_db
                 {"role": "assistant", "content": '''
                     {
                         "patches": [
-                            { "tag": "문체/스타일 개선", "from": "도커", "to": "Docker", "occurrence": 1 },
-                            { "tag": "모호/지시 불명확", "from": "설명해줘", "to": "컨테이너 개념과 이미지/레지스트리 중심으로 설명해줘.", "occurrence": 1 }
+                            { 
+                                "tag": "문체/스타일 개선", 
+                                "from": "도커", 
+                                "to": "Docker"
+                            },
+                            { 
+                                "tag": "모호/지시 불명확",
+                                "from": "설명해줘", 
+                                "to": "컨테이너 개념과 이미지/레지스트리 중심으로 설명해줘."
+                            }
                         ],
                         "full_suggestion": "Docker에 대해 컨테이너 개념과 이미지/레지스트리 중심으로 설명해줘."
                     }
@@ -90,17 +101,20 @@ async def analyze_prompt(in_: AnalyzePromptRequest, db: Session = Depends(get_db
                 {"role": "assistant", "content": '''
                     {
                         "patches": [
-                            {“tag”:“모호/지시 불명확”.
-                                “from”: "설명",
-                                “to”: "기본 개념을 3가지 핵심 포인트로 설명"
+                            {
+                                "tag":"모호/지시 불명확",
+                                "from": "설명",
+                                "to": "기본 개념을 3가지 핵심 포인트로 설명"
                             },
-                            {“tag”:구조/길이 중복”,
-                                “from”: "자세하고 상세하게",
-                                “to”: "자세하게"
+                            {
+                                "tag":"구조/길이 중복",
+                                "from": "자세하고 상세하게",
+                                "to": "자세하게"
                             },
-                            {“tag”: "오타/맞춤법”:,
-                                “from”: "해줬스면",
-                                “to”: "해주었으면”
+                            {
+                                "tag": "오타/맞춤법",
+                                "from": "해줬스면",
+                                "to": "해주었으면"
                             }
                         ],
                         "full_suggestion": "인공지능에 대해 자세하게 기본 개념을 3가지 핵심 포인트로 설명 해주었으면 좋겠어."
@@ -137,7 +151,7 @@ async def analyze_prompt(in_: AnalyzePromptRequest, db: Session = Depends(get_db
                 }
             },
             temperature=0.3,
-            max_tokens=8192
+            max_tokens=1024
         )
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"LLM API 연동 에러: {e}")
