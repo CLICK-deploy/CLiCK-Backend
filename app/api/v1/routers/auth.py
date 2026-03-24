@@ -2,11 +2,14 @@ from datetime import timedelta
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
+from sqlalchemy import select
 from typing import Optional
+from jose import JWTError
 from app.db.session import get_db
 from app.services import user_service
-from app.core.security import create_jwt
+from app.core.security import create_jwt, decode_jwt
 from app.core.config import settings
+from app.models.user import User
 
 router = APIRouter(prefix="")
 
@@ -33,6 +36,15 @@ class AuthResponse(BaseModel):
     token_type: str
     userID: str
     message: str
+
+
+class RefreshRequest(BaseModel):
+    refresh_token: str
+
+
+class RefreshResponse(BaseModel):
+    access_token: str
+    token_type: str
 
 
 class CheckDuplicateRequest(BaseModel):
@@ -109,4 +121,23 @@ def check_duplicate(in_: CheckDuplicateRequest, db: Session = Depends(get_db)):
 
     taken = user_service.is_exist_user(in_.userId.strip(), db)
     return CheckDuplicateResponse(available=not taken)
+
+
+@router.post("/refresh", summary="액세스 토큰 갱신", response_model=RefreshResponse)
+def refresh_token(in_: RefreshRequest, db: Session = Depends(get_db)):
+    try:
+        payload = decode_jwt(in_.refresh_token, refresh=True)
+    except JWTError:
+        raise HTTPException(status_code=401, detail="유효하지 않은 리프레시 토큰입니다.")
+
+    nickname: str = payload.get("sub")
+    if not nickname:
+        raise HTTPException(status_code=401, detail="토큰에 사용자 정보가 없습니다.")
+
+    user = db.execute(select(User).where(User.nickname == nickname)).scalar()
+    if user is None:
+        raise HTTPException(status_code=401, detail="존재하지 않는 사용자입니다.")
+
+    new_access_token = create_jwt(user.nickname, expires_delta=settings.access_expires)
+    return RefreshResponse(access_token=new_access_token, token_type="Bearer")
 

@@ -7,7 +7,7 @@ from app.schemas.gpt import RoomTrace, RecommendInput
 from app.models.user import User
 from sqlalchemy.orm import Session
 from fastapi import APIRouter, HTTPException, Depends
-from huggingface_hub import InferenceClient
+import google.generativeai as genai
 from app.services import user_service, event_service, history_service
 from app.db.session import get_db
 from app.services.history_service import create_history, get_histories, get_histories_new
@@ -15,10 +15,7 @@ from app.core.security import get_current_user
 
 router = APIRouter(prefix="")
 
-client = InferenceClient(
-    provider="scaleway",
-    api_key=settings.GEMMA_API_KEY
-)
+genai.configure(api_key=settings.GEMINI_API_KEY)
 
 
 @router.post(path="/trace_input", summary="유저 질문 수집 -> 유저의 관심사 파악")
@@ -56,16 +53,16 @@ async def get_recommend_prompts(in_: RecommendInput, db: Session = Depends(get_d
     user_payload = {"topics": topics}
 
     try:
-        resp = client.chat_completion(
-            model="google/gemma-3-27b-it",
-            messages=[
-                {"role": "system", "content": sys_prompt},
-                {"role": "user", "content": json.dumps(user_payload, ensure_ascii=False)},
-            ],
-            temperature=0.4,
-            max_tokens=1024
+        model = genai.GenerativeModel(
+            model_name="gemini-2.5-flash-lite",
+            system_instruction=sys_prompt,
+            generation_config=genai.types.GenerationConfig(
+                temperature=0.4,
+                max_output_tokens=1024
+            )
         )
-        raw = resp.choices[0].message.content.strip()
+        resp = model.generate_content(json.dumps(user_payload, ensure_ascii=False))
+        raw = resp.text.strip()
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"LLM 모델 호출 실패: {e}")
 
