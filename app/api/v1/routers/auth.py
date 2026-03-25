@@ -1,4 +1,4 @@
-from datetime import timedelta
+from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -137,6 +137,9 @@ def refresh_token(in_: RefreshRequest, db: Session = Depends(get_db)):
     user = db.execute(select(User).where(User.nickname == nickname)).scalar()
     if user is None:
         raise HTTPException(status_code=401, detail="존재하지 않는 사용자입니다.")
+
+    user.lastLogin = datetime.now(timezone(timedelta(hours=9))).replace(tzinfo=None)
+    db.commit()
 
     new_access_token = create_jwt(user.nickname, expires_delta=settings.access_expires)
     return RefreshResponse(access_token=new_access_token, token_type="Bearer")

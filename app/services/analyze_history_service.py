@@ -1,4 +1,4 @@
-from app.models.event import AnalyzeHistory
+from app.models.analyze_history import AnalyzeHistory
 from sqlalchemy.orm import Session
 from fastapi import HTTPException
 

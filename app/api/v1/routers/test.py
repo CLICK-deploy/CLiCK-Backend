@@ -5,7 +5,7 @@ import re
 from typing import Dict, List, Optional
 from app.core.config import settings
 from app.core.prompts.prompt_loader import IMPROVE_SYS_PROMPT
-from app.services import user_service, event_service
+from app.services import user_service, analyze_history_service
 from app.db.session import get_db
 from app.models.user import User
 from sqlalchemy.orm import Session
@@ -108,7 +108,7 @@ async def analyze_prompt(in_: AnalyzePromptRequest, db: Session = Depends(get_db
 
     # 5) DB 저장 (실패해도 응답은 반환)
     try:
-        event_service.create_event(
+        analyze_history_service.create_event(
             current_user.user_id,
             in_.prompt,
             {"improved_prompt": full_suggestion, "task_type": ", ".join(tags)},

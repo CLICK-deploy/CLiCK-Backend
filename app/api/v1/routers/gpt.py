@@ -8,9 +8,10 @@ from app.models.user import User
 from sqlalchemy.orm import Session
 from fastapi import APIRouter, HTTPException, Depends
 import google.generativeai as genai
-from app.services import user_service, event_service, history_service
+from app.services import user_service, analyze_history_service, input_history_service
+from app.services import recommended_history_service
 from app.db.session import get_db
-from app.services.history_service import create_history, get_histories, get_histories_new
+from app.services.input_history_service import create_history, get_histories, get_histories_new
 from app.core.security import get_current_user
 
 router = APIRouter(prefix="")
@@ -20,30 +21,36 @@ genai.configure(api_key=settings.GEMINI_API_KEY)
 
 @router.post(path="/trace_input", summary="유저 질문 수집 -> 유저의 관심사 파악")
 def trace_input_prompt(in_: RoomTrace, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    history_service.create_history(in_, 'user', current_user.user_id, db)
+    input_history_service.create_history(in_, current_user.user_id, db)
     return {"status": "success"}
 
 @router.post(path="/trace_output_prompt", summary="ai 답변 수집 -> 유저의 관심사 파악")
 def trace_output_prompt(in_: RoomTrace, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    history_service.create_history(in_, 'ai', current_user.user_id, db)
+    input_history_service.create_history(in_, current_user.user_id, db)
     return {"status": "success"}
 
 @router.post("/recommended-prompts", summary="유저별 관심사 기반 추천 프롬프트 1개 생성",
              response_model=Dict[str, dict])
 async def get_recommend_prompts(in_: RecommendInput, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     # 1) 조건에 따른 히스토리 조회 및 시스템 프롬프트 할당
-    if in_.chatID is None:
+    # 빈 문자열도 None으로 처리
+    chat_id = in_.chatID if in_.chatID else None
+
+    print(f"[recommended-prompts] user_id={current_user.user_id}, chatID={repr(chat_id)}")
+
+    if chat_id is None:
         # 새 채팅 — 전체 히스토리 기반, global 키 사용
         histories = get_histories_new(current_user.user_id, db)
         sys_prompt = REC_SYS_PROMPT2
         response_key = "global"
     else:
         # 기존 채팅방
-        histories = get_histories(current_user.user_id, in_.chatID, db)
+        histories = get_histories(current_user.user_id, chat_id, db)
         sys_prompt = REC_SYS_PROMPT1
-        response_key = in_.chatID
+        response_key = chat_id
 
-    topics = [h.topic for h in histories]
+    topics = [h.input for h in histories]
+    print(f"[recommended-prompts] fetched {len(topics)} topics from room={repr(response_key)}: {topics}")
 
     # 히스토리가 전혀 없으면 빈 객체 반환
     if not topics:
@@ -94,6 +101,16 @@ async def get_recommend_prompts(in_: RecommendInput, db: Session = Depends(get_d
         "title": item.get("title", "")[:30],
         "content": item.get("content", ""),
     }
+
+    # 추천 결과를 recommended_history 테이블에 저장
+    if result["title"] or result["content"]:
+        recommended_history_service.create_recommended_history(
+            user_id=current_user.user_id,
+            chat_id=chat_id,
+            title=result["title"],
+            content=result["content"],
+            db=db,
+        )
 
     return {response_key: result}
 

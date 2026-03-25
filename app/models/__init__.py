@@ -1,4 +1,5 @@
 from .user import User
-from .event import Event
-from .history import History
-__all__ = ["User", "Event", "History"]
+from .analyze_history import AnalyzeHistory
+from .input_history import InputHistory
+from .recommended_history import RecommendedHistory
+__all__ = ["User", "AnalyzeHistory", "InputHistory", "RecommendedHistory"]

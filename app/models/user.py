@@ -6,7 +6,7 @@ from sqlalchemy.orm import relationship
 from enum import Enum as PyEnum
 from sqlalchemy import Enum as SQLAlchemyEnum
 
-class Grade(PyEnum):
+class Plan(PyEnum):
     GENERAL = "GENERAL"
     VIP = "VIP"
 
@@ -16,14 +16,14 @@ class User(Base):
     now = datetime.now(timezone(timedelta(hours=9)))
 
     user_id = Column(Integer, primary_key=True, autoincrement=True)
-    device_uuid = Column(String(36), unique=True)
     nickname = Column(String(20), unique=True, index=True, nullable=True)
     password = Column(String(255), nullable=True)
     gender = Column(String(10), nullable=True)
     age = Column(String(10), nullable=True)
-    grade = Column(SQLAlchemyEnum(Grade), nullable=True, default=Grade.GENERAL)
+    plan = Column(SQLAlchemyEnum(Plan), nullable=True, default=Plan.GENERAL)
     lastLogin = Column(DateTime, nullable=True)
     created_at = Column(DateTime, server_default=func.current_timestamp(), nullable=False)
 
-    events = relationship("Event", back_populates="user")
-    histories = relationship("History", back_populates="user")
+    analyze_histories = relationship("AnalyzeHistory", back_populates="user")
+    input_histories = relationship("InputHistory", back_populates="user")
+    recommended_histories = relationship("RecommendedHistory", back_populates="user")
