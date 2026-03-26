@@ -73,7 +73,7 @@ async def analyze_prompt(in_: AnalyzePromptRequest, db: Session = Depends(get_db
             system_instruction=IMPROVE_SYS_PROMPT,
             generation_config=genai.types.GenerationConfig(
                 temperature=0.3,
-                max_output_tokens=1024,
+                max_output_tokens=2048,
                 response_mime_type="application/json",
             )
         )

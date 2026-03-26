@@ -32,22 +32,29 @@ def trace_output_prompt(in_: RoomTrace, db: Session = Depends(get_db), current_u
 @router.post("/recommended-prompts", summary="유저별 관심사 기반 추천 프롬프트 1개 생성",
              response_model=Dict[str, dict])
 async def get_recommend_prompts(in_: RecommendInput, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    # 1) 조건에 따른 히스토리 조회 및 시스템 프롬프트 할당
     # 빈 문자열도 None으로 처리
     chat_id = in_.chatID if in_.chatID else None
 
-    print(f"[recommended-prompts] user_id={current_user.user_id}, chatID={repr(chat_id)}")
+    print(f"[recommended-prompts] user_id={current_user.user_id}, chatID={repr(chat_id)}, generate={in_.generate}")
 
+    response_key = chat_id if chat_id else "global"
+
+    # generate=False: 채팅방 전환 시 DB 캐시만 조회 (LLM 호출 없음)
+    if not in_.generate:
+        cached = recommended_history_service.get_latest_by_chat(current_user.user_id, chat_id, db)
+        if cached:
+            return {response_key: {"title": cached.title, "content": cached.content}}
+        return {response_key: {}}
+
+    # generate=True: LLM으로 새 추천 생성
     if chat_id is None:
         # 새 채팅 — 전체 히스토리 기반, global 키 사용
         histories = get_histories_new(current_user.user_id, db)
         sys_prompt = REC_SYS_PROMPT2
-        response_key = "global"
     else:
         # 기존 채팅방
         histories = get_histories(current_user.user_id, chat_id, db)
         sys_prompt = REC_SYS_PROMPT1
-        response_key = chat_id
 
     topics = [h.input for h in histories]
     print(f"[recommended-prompts] fetched {len(topics)} topics from room={repr(response_key)}: {topics}")

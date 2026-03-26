@@ -8,6 +8,7 @@ class RoomTrace(BaseModel):
 
 class RecommendInput(BaseModel):
     chatID: Optional[str] = None
+    generate: bool = True  # False: DB에서 캐시 조회만, True: LLM 호출하여 새 추천 생성
 
 class Patch(BaseModel):
     tag: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
