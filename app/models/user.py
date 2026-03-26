@@ -23,6 +23,7 @@ class User(Base):
     plan = Column(SQLAlchemyEnum(Plan), nullable=True, default=Plan.GENERAL)
     lastLogin = Column(DateTime, nullable=True)
     created_at = Column(DateTime, server_default=func.current_timestamp(), nullable=False)
+    rating = Column(Integer, nullable=True)
 
     analyze_histories = relationship("AnalyzeHistory", back_populates="user")
     input_histories = relationship("InputHistory", back_populates="user")

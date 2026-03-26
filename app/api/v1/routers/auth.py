@@ -7,7 +7,7 @@ from typing import Optional
 from jose import JWTError
 from app.db.session import get_db
 from app.services import user_service
-from app.core.security import create_jwt, decode_jwt
+from app.core.security import create_jwt, decode_jwt, get_current_user
 from app.core.config import settings
 from app.models.user import User
 
@@ -143,4 +143,21 @@ def refresh_token(in_: RefreshRequest, db: Session = Depends(get_db)):
 
     new_access_token = create_jwt(user.nickname, expires_delta=settings.access_expires)
     return RefreshResponse(access_token=new_access_token, token_type="Bearer")
+
+
+class SurveyRequest(BaseModel):
+    rating: int
+
+
+@router.post("/survey", summary="만족도 조사 제출")
+def submit_survey(
+    in_: SurveyRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    if not (1 <= in_.rating <= 5):
+        raise HTTPException(status_code=400, detail="rating은 1~5 사이여야 합니다.")
+    current_user.rating = in_.rating
+    db.commit()
+    return {"status": "success"}
 
